@@ -202,10 +202,9 @@ Use the interactive config wizard to set MiniMax without editing JSON:
 ### "Unknown model: minimax/MiniMax-M2.7"
 
 This usually means the **MiniMax provider isn’t configured** (no provider entry
-and no MiniMax auth profile/env key found). A fix for this detection is in
-**2026.1.12** (unreleased at the time of writing). Fix by:
+and no MiniMax auth profile/env key found). Fix by:
 
-- Upgrading to **2026.1.12** (or run from source `main`), then restarting the gateway.
+- Upgrading to a current OpenClaw release (or run from source `main`), then restarting the gateway.
 - Running `openclaw configure` and selecting a **MiniMax** auth option, or
 - Adding the `models.providers.minimax` block manually, or
 - Setting `MINIMAX_API_KEY` (or a MiniMax auth profile) so the provider can be injected.
