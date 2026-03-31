@@ -349,6 +349,10 @@ async function assertSafeUploadSymlinks(localDir: string): Promise<void> {
       const entryPath = path.join(currentDir, entry.name);
       if (entry.isSymbolicLink()) {
         try {
+          const linkTarget = await fs.readlink(entryPath);
+          if (path.isAbsolute(linkTarget)) {
+            throw new Error("absolute symlink targets are not allowed");
+          }
           await resolveBoundaryPath({
             absolutePath: entryPath,
             rootPath: rootDir,

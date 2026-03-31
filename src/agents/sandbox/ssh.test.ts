@@ -132,6 +132,29 @@ describe("sandbox ssh helpers", () => {
   );
 
   it.runIf(process.platform !== "win32")(
+    "rejects absolute symlinks even when they point inside the local workspace",
+    async () => {
+      const localDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ssh-upload-"));
+      tempDirs.push(localDir);
+      const targetPath = path.join(localDir, "inside.txt");
+      await fs.writeFile(targetPath, "hello");
+      await fs.symlink(targetPath, path.join(localDir, "absolute-inside"));
+
+      await expect(
+        uploadDirectoryToSshTarget({
+          session: {
+            command: "ssh",
+            configPath: "/tmp/openclaw-test-ssh-config",
+            host: "openclaw-sandbox",
+          },
+          localDir,
+          remoteDir: "/remote/workspace",
+        }),
+      ).rejects.toThrow(/refuses symlink escaping the workspace: absolute-inside/i);
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
     "allows in-workspace symlinks that point to hardlinked files",
     async () => {
       const localDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ssh-upload-safe-"));
