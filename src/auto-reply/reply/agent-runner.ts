@@ -866,14 +866,14 @@ export async function runReplyAgent(params: {
     if (verboseNotices.length > 0) {
       finalPayloads = [...verboseNotices, ...finalPayloads];
     }
+    if (responseUsageLine) {
+      finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
+    }
     if (verboseEnabled) {
       const pluginStatusPayload = buildInlinePluginStatusPayload(activeSessionEntry);
       if (pluginStatusPayload) {
         finalPayloads = [...finalPayloads, pluginStatusPayload];
       }
-    }
-    if (responseUsageLine) {
-      finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
     }
 
     return finalizeWithFollowup(
