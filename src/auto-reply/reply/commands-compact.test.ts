@@ -285,6 +285,9 @@ describe("handleCompactCommand", () => {
       ok: true,
       compacted: true,
       result: {
+        summary: "compacted",
+        firstKeptEntryId: "first-kept",
+        tokensBefore: 999,
         tokensAfter: 321,
       },
     });
@@ -316,6 +319,7 @@ describe("handleCompactCommand", () => {
           sessionId: "target-session",
         }),
         tokensAfter: 321,
+        skillsSnapshot: { prompt: "target", skills: [] },
       }),
     );
   });
