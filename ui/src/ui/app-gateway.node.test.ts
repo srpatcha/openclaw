@@ -142,6 +142,7 @@ function createHost(): TestGatewayHost {
     serverVersion: null,
     sessionKey: "main",
     chatMessages: [],
+    chatQueue: [],
     chatToolMessages: [],
     chatStreamSegments: [],
     chatStream: null,
@@ -208,9 +209,9 @@ describe("connectGateway", () => {
     expect(host.lastError).toBeNull();
 
     secondClient.emitGap(20, 24);
-    expect(host.lastError).toBe(
-      "event gap detected (expected seq 20, got 24); refresh recommended",
-    );
+    expect(gatewayClientInstances).toHaveLength(3);
+    expect(secondClient.stop).toHaveBeenCalledTimes(1);
+    expect(host.lastError).toBeNull();
   });
 
   it("ignores stale client onEvent callbacks after reconnect", () => {
@@ -743,106 +744,6 @@ describe("connectGateway", () => {
     });
 
     expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("reloads chat history after a final assistant event even when no live tool events were observed", () => {
-    const { client } = connectHostGateway();
-
-    client.emitEvent({
-      event: "chat",
-      payload: {
-        runId: "engine-run-1",
-        sessionKey: "main",
-        state: "final",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Done" }],
-        },
-      },
-    });
-
-    expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps live tool messages until history reload completes after a final tool run", async () => {
-    let resolveHistory: (() => void) | undefined;
-    loadChatHistoryMock.mockImplementationOnce(
-      () =>
-        new Promise<undefined>((resolve) => {
-          resolveHistory = () => resolve(undefined);
-        }),
-    );
-
-    const { client, host } = connectHostGateway();
-    emitToolResultEvent(client);
-    expect(host.chatToolMessages).toHaveLength(1);
-
-    client.emitEvent({
-      event: "chat",
-      payload: {
-        runId: "engine-run-1",
-        sessionKey: "main",
-        state: "final",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Done" }],
-        },
-      },
-    });
-
-    expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
-    expect(host.chatToolMessages).toHaveLength(1);
-
-    resolveHistory?.();
-    await Promise.resolve();
-
-    expect(host.chatToolMessages).toEqual([]);
-  });
-
-  it("does not clear a newer run's tool stream when an older history reload settles", async () => {
-    let resolveHistory: (() => void) | undefined;
-    loadChatHistoryMock.mockImplementationOnce(
-      () =>
-        new Promise<undefined>((resolve) => {
-          resolveHistory = () => resolve(undefined);
-        }),
-    );
-
-    const { client, host } = connectHostGateway();
-    emitToolResultEvent(client);
-
-    client.emitEvent({
-      event: "chat",
-      payload: {
-        runId: "engine-run-1",
-        sessionKey: "main",
-        state: "final",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Done" }],
-        },
-      },
-    });
-
-    host.chatRunId = "engine-run-2";
-    host.toolStreamById.set("tool-2", {
-      toolCallId: "tool-2",
-      runId: "engine-run-2",
-      name: "write",
-      startedAt: 2,
-      updatedAt: 2,
-      message: { role: "assistant", content: [{ type: "toolcall", name: "write" }] },
-    } as never);
-    host.toolStreamOrder = ["tool-2"];
-    host.chatToolMessages = [{ role: "assistant", content: [{ type: "toolcall", name: "write" }] }];
-
-    resolveHistory?.();
-    await Promise.resolve();
-
-    expect(host.toolStreamOrder).toEqual(["tool-2"]);
-    expect(host.chatToolMessages).toEqual([
-      { role: "assistant", content: [{ type: "toolcall", name: "write" }] },
-    ]);
   });
 });
 

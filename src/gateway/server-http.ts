@@ -29,6 +29,7 @@ import {
   type ResolvedGatewayAuth,
 } from "./auth.js";
 import { normalizeCanvasScopedUrl } from "./canvas-capability.js";
+import { resolveAssistantIdentity } from "./assistant-identity.js";
 import {
   handleControlUiAssistantMediaRequest,
   handleControlUiAvatarRequest,
@@ -956,6 +957,8 @@ export function createGatewayHttpServer(opts: {
           run: () =>
             handleControlUiAssistantMediaRequest(req, res, {
               basePath: controlUiBasePath,
+              config: configSnapshot,
+              agentId: resolveAssistantIdentity({ cfg: configSnapshot }).agentId,
               auth: resolvedAuth,
               trustedProxies,
               allowRealIpFallback,
@@ -977,6 +980,7 @@ export function createGatewayHttpServer(opts: {
             handleControlUiHttpRequest(req, res, {
               basePath: controlUiBasePath,
               config: configSnapshot,
+              agentId: resolveAssistantIdentity({ cfg: configSnapshot }).agentId,
               root: controlUiRoot,
             }),
         });

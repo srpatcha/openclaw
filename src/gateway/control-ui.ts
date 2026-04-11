@@ -12,6 +12,7 @@ import { safeFileURLToPath } from "../infra/local-file-access.js";
 import { isWithinDir } from "../infra/path-safety.js";
 import { openVerifiedFileSync } from "../infra/safe-open-sync.js";
 import { assertLocalMediaAllowed, getDefaultLocalRoots } from "../media/local-media-access.js";
+import { getAgentScopedMediaLocalRoots } from "../media/local-roots.js";
 import { detectMime } from "../media/mime.js";
 import { AVATAR_MAX_BYTES } from "../shared/avatar-policy.js";
 import { resolveUserPath } from "../utils.js";
@@ -256,9 +257,10 @@ function classifyAssistantMediaError(err: unknown): AssistantMediaAvailability {
 
 async function resolveAssistantMediaAvailability(
   source: string,
+  localRoots: readonly string[],
 ): Promise<AssistantMediaAvailability> {
   try {
-    await assertLocalMediaAllowed(source, getDefaultLocalRoots());
+    await assertLocalMediaAllowed(source, localRoots);
     const opened = await openLocalFileSafely({ filePath: source });
     await opened.handle.close();
     return { available: true };
@@ -272,6 +274,8 @@ export async function handleControlUiAssistantMediaRequest(
   res: ServerResponse,
   opts?: {
     basePath?: string;
+    config?: OpenClawConfig;
+    agentId?: string;
     auth?: ResolvedGatewayAuth;
     trustedProxies?: string[];
     allowRealIpFallback?: boolean;
@@ -309,9 +313,11 @@ export async function handleControlUiAssistantMediaRequest(
     respondControlUiNotFound(res);
     return true;
   }
+  const localRoots =
+    opts?.config ? getAgentScopedMediaLocalRoots(opts.config, opts.agentId) : getDefaultLocalRoots();
 
   if (url.searchParams.get("meta") === "1") {
-    const availability = await resolveAssistantMediaAvailability(source);
+    const availability = await resolveAssistantMediaAvailability(source, localRoots);
     sendJson(res, 200, availability);
     return true;
   }
@@ -326,7 +332,7 @@ export async function handleControlUiAssistantMediaRequest(
     await opened.handle.close().catch(() => {});
   };
   try {
-    await assertLocalMediaAllowed(source, getDefaultLocalRoots());
+    await assertLocalMediaAllowed(source, localRoots);
     opened = await openLocalFileSafely({ filePath: source });
     const sniffLength = Math.min(opened.stat.size, 8192);
     const sniffBuffer = sniffLength > 0 ? Buffer.allocUnsafe(sniffLength) : undefined;
@@ -583,7 +589,7 @@ export function handleControlUiHttpRequest(
       assistantAvatar: avatarValue ?? identity.avatar,
       assistantAgentId: identity.agentId,
       serverVersion: resolveRuntimeServiceVersion(process.env),
-      localMediaPreviewRoots: [...getDefaultLocalRoots()],
+      localMediaPreviewRoots: [...getAgentScopedMediaLocalRoots(config ?? {}, identity.agentId)],
       embedSandbox:
         config?.gateway?.controlUi?.embedSandbox === "trusted"
           ? "trusted"

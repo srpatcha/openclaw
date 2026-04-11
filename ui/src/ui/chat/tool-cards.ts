@@ -227,7 +227,7 @@ export function buildToolCardSidebarContent(card: ToolCard): string {
   }
 
   if (card.outputText?.trim()) {
-    sections.push(`### Tool output\n${formatPayloadForSidebar(card.outputText)}`);
+    sections.push(`### Tool output\n${formatToolOutputForSidebar(card.outputText)}`);
   } else {
     sections.push(`### Tool output\n*No output — tool completed successfully.*`);
   }
@@ -521,11 +521,68 @@ export function renderToolCardSidebar(
   canvasHostUrl?: string | null,
   embedSandboxMode: EmbedSandboxMode = "scripts",
 ) {
-  return renderToolCard(card, {
-    expanded: false,
-    onToggleExpanded: () => undefined,
-    onOpenSidebar,
-    canvasHostUrl,
-    embedSandboxMode,
-  });
+  const display = resolveToolDisplay({ name: card.name, args: card.args });
+  const detail = formatToolDetail(display);
+  const hasText = Boolean(card.outputText?.trim());
+  const hasPreview = Boolean(card.preview);
+  const sidebarContent =
+    card.preview?.kind === "canvas"
+      ? buildPreviewSidebarContent(card.preview, card.outputText)
+      : buildSidebarContent(buildToolCardSidebarContent(card));
+  const actionContent = sidebarContent ?? buildSidebarContent(buildToolCardSidebarContent(card));
+  const canClick = Boolean(onOpenSidebar);
+  const handleClick = canClick ? () => onOpenSidebar?.(actionContent) : undefined;
+  const isShort = hasText && !hasPreview && (card.outputText?.length ?? 0) <= 240;
+  const showCollapsed = hasText && !hasPreview && !isShort;
+  const showInline = hasText && !hasPreview && isShort;
+  const isEmpty = !hasText && !hasPreview;
+
+  return html`
+    <div
+      class="chat-tool-card ${canClick ? "chat-tool-card--clickable" : ""}"
+      @click=${handleClick}
+      role=${canClick ? "button" : nothing}
+      tabindex=${canClick ? "0" : nothing}
+      @keydown=${canClick
+        ? (e: KeyboardEvent) => {
+            if (e.key !== "Enter" && e.key !== " ") {
+              return;
+            }
+            e.preventDefault();
+            handleClick?.();
+          }
+        : nothing}
+    >
+      <div class="chat-tool-card__header">
+        <div class="chat-tool-card__title">
+          <span class="chat-tool-card__icon">${icons[display.icon]}</span>
+          <span>${display.label}</span>
+        </div>
+        ${canClick
+          ? html`<span class="chat-tool-card__action"
+              >${hasText || hasPreview ? "View" : ""} ${icons.check}</span
+            >`
+          : nothing}
+        ${isEmpty && !canClick
+          ? html`<span class="chat-tool-card__status">${icons.check}</span>`
+          : nothing}
+      </div>
+      ${detail ? html`<div class="chat-tool-card__detail">${detail}</div>` : nothing}
+      ${isEmpty ? html`<div class="chat-tool-card__status-text muted">Completed</div>` : nothing}
+      ${hasPreview
+        ? html`${renderToolPreview(card.preview!, "chat_tool", {
+            onOpenSidebar,
+            rawText: card.outputText,
+            canvasHostUrl,
+            embedSandboxMode,
+          })}`
+        : nothing}
+      ${showCollapsed
+        ? html`<div class="chat-tool-card__preview mono">
+            ${getTruncatedPreview(card.outputText!)}
+          </div>`
+        : nothing}
+      ${showInline ? html`<div class="chat-tool-card__inline mono">${card.outputText}</div>` : nothing}
+    </div>
+  `;
 }
