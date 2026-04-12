@@ -8,6 +8,10 @@ const STARTUP_MEMORY_FILE_MAX_BYTES = 16_384;
 const STARTUP_MEMORY_FILE_MAX_CHARS = 2_000;
 const STARTUP_MEMORY_TOTAL_MAX_CHARS = 4_500;
 const STARTUP_MEMORY_DAILY_DAYS = 2;
+const STARTUP_MEMORY_FILE_MAX_BYTES_CAP = 64 * 1024;
+const STARTUP_MEMORY_FILE_MAX_CHARS_CAP = 10_000;
+const STARTUP_MEMORY_TOTAL_MAX_CHARS_CAP = 50_000;
+const STARTUP_MEMORY_DAILY_DAYS_CAP = 14;
 
 export function shouldApplyStartupContext(params: {
   cfg?: OpenClawConfig;
@@ -26,11 +30,35 @@ export function shouldApplyStartupContext(params: {
 
 function resolveStartupContextLimits(cfg?: OpenClawConfig) {
   const startupContext = cfg?.agents?.defaults?.startupContext;
+  const clampInt = (value: number | undefined, fallback: number, min: number, max: number) => {
+    const numeric = Number.isFinite(value) ? Math.trunc(value as number) : fallback;
+    return Math.min(max, Math.max(min, numeric));
+  };
   return {
-    dailyMemoryDays: startupContext?.dailyMemoryDays ?? STARTUP_MEMORY_DAILY_DAYS,
-    maxFileBytes: startupContext?.maxFileBytes ?? STARTUP_MEMORY_FILE_MAX_BYTES,
-    maxFileChars: startupContext?.maxFileChars ?? STARTUP_MEMORY_FILE_MAX_CHARS,
-    maxTotalChars: startupContext?.maxTotalChars ?? STARTUP_MEMORY_TOTAL_MAX_CHARS,
+    dailyMemoryDays: clampInt(
+      startupContext?.dailyMemoryDays,
+      STARTUP_MEMORY_DAILY_DAYS,
+      1,
+      STARTUP_MEMORY_DAILY_DAYS_CAP,
+    ),
+    maxFileBytes: clampInt(
+      startupContext?.maxFileBytes,
+      STARTUP_MEMORY_FILE_MAX_BYTES,
+      1,
+      STARTUP_MEMORY_FILE_MAX_BYTES_CAP,
+    ),
+    maxFileChars: clampInt(
+      startupContext?.maxFileChars,
+      STARTUP_MEMORY_FILE_MAX_CHARS,
+      1,
+      STARTUP_MEMORY_FILE_MAX_CHARS_CAP,
+    ),
+    maxTotalChars: clampInt(
+      startupContext?.maxTotalChars,
+      STARTUP_MEMORY_TOTAL_MAX_CHARS,
+      1,
+      STARTUP_MEMORY_TOTAL_MAX_CHARS_CAP,
+    ),
   };
 }
 
@@ -56,6 +84,10 @@ function trimStartupMemoryContent(content: string, maxChars: number): string {
     return trimmed;
   }
   return `${trimmed.slice(0, maxChars)}\n...[truncated]...`;
+}
+
+function escapeQuotedStartupMemory(content: string): string {
+  return content.replaceAll("```", "\\`\\`\\`");
 }
 
 async function readFromFd(params: { fd: number; maxFileBytes: number }): Promise<string> {
@@ -143,7 +175,14 @@ export async function buildSessionStartupContextPrelude(params: {
   const sections: string[] = [];
   let totalChars = 0;
   for (const entry of loaded) {
-    const block = `[Untrusted daily memory: ${entry.relativePath}]\n${entry.content}`;
+    const block = [
+      `[Untrusted daily memory: ${entry.relativePath}]`,
+      "BEGIN_QUOTED_NOTES",
+      "```text",
+      escapeQuotedStartupMemory(entry.content),
+      "```",
+      "END_QUOTED_NOTES",
+    ].join("\n");
     if (sections.length > 0 && totalChars + block.length > limits.maxTotalChars) {
       sections.push("...[additional startup memory truncated]...");
       break;

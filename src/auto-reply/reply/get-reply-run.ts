@@ -288,8 +288,10 @@ export async function runPreparedReply(
   // Use CommandBody/RawBody for bare reset detection (clean message without structural context).
   const rawBodyTrimmed = (ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "").trim();
   const baseBodyTrimmedRaw = baseBody.trim();
-  const isWholeMessageCommand = command.commandBodyNormalized.trim() === rawBodyTrimmed;
-  const isResetOrNewCommand = /^\/(new|reset)(?:\s|$)/.test(rawBodyTrimmed);
+  const normalizedCommandBody = command.commandBodyNormalized.trim();
+  const isWholeMessageCommand =
+    normalizedCommandBody === rawBodyTrimmed || normalizedCommandBody === rawBodyTrimmed.toLowerCase();
+  const isResetOrNewCommand = /^\/(new|reset)(?:\s|$)/.test(normalizedCommandBody);
   if (
     allowTextCommands &&
     (!commandAuthorized || !command.isAuthorizedSender) &&
@@ -299,11 +301,11 @@ export async function runPreparedReply(
     typing.cleanup();
     return undefined;
   }
-  const isBareNewOrReset = rawBodyTrimmed === "/new" || rawBodyTrimmed === "/reset";
+  const isBareNewOrReset = /^\/(new|reset)$/.test(normalizedCommandBody);
   const isBareSessionReset =
     isNewSession &&
     ((baseBodyTrimmedRaw.length === 0 && rawBodyTrimmed.length > 0) || isBareNewOrReset);
-  const startupAction = rawBodyTrimmed === "/reset" ? "reset" : "new";
+  const startupAction = /^\/reset(?:\s|$)/.test(normalizedCommandBody) ? "reset" : "new";
   const startupContextPrelude = isBareSessionReset &&
     shouldApplyStartupContext({ cfg, action: startupAction })
     ? await buildSessionStartupContextPrelude({
