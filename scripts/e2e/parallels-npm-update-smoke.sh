@@ -138,6 +138,43 @@ refresh_update_summary_state() {
     parallels_seed_update_status_summary "$RUN_DIR" "$os_name"
   fi
   parallels_load_update_status_summary "$prefix" "$status_path"
+  backfill_update_statuses_from_log "$prefix" "$log_path"
+}
+
+backfill_update_statuses_from_log() {
+  local prefix="$1"
+  local log_path="$2"
+  [[ -f "$log_path" ]] || return 0
+
+  local assignments
+  set +e
+  assignments="$(
+    PREFIX="$prefix" "$PYTHON_BIN" - "$log_path" <<'PY'
+import pathlib
+import shlex
+import sys
+import os
+
+prefix = os.environ["PREFIX"]
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+marker_map = {
+    "update.gateway.ok": "GATEWAY_STATUS",
+    "update.permissions.ok": "PERMISSION_STATUS",
+    "update.channels.ok": "CHANNELS_STATUS",
+    "update.dashboard.ok": "DASHBOARD_STATUS",
+    "update.agent.ok": "AGENT_STATUS",
+}
+
+for marker, key in marker_map.items():
+    if f"==> {marker}" in text:
+        print(f"{prefix}_{key}={shlex.quote('pass')}")
+PY
+  )"
+  local rc=$?
+  set -e
+  if [[ $rc -eq 0 && -n "$assignments" ]]; then
+    eval "$assignments"
+  fi
 }
 
 summary_has_activity() {
@@ -759,6 +796,7 @@ $(parallels_windows_permission_helpers_ps)
   Invoke-Logged 'openclaw update status' { & $openclaw update status --json }
   Write-ProgressLog 'update.permissions'
   Assert-NonBroadWritableInstall
+  Write-ProgressLog 'update.permissions.ok'
   Write-ProgressLog 'update.set-model'
   Invoke-Logged 'openclaw models set' { & $openclaw models set $ModelId }
   # Windows can keep the old hashed dist modules alive across in-place global npm upgrades.
@@ -768,12 +806,16 @@ $(parallels_windows_permission_helpers_ps)
   # an explicit start only if the RPC endpoint never returns.
   Write-ProgressLog 'update.restart-gateway'
   Restart-GatewayWithRecovery -OpenClawPath $openclaw
+  Write-ProgressLog 'update.gateway.ok'
   Write-ProgressLog 'update.channels-status'
   Invoke-Logged 'openclaw channels status' { & $openclaw channels status --probe --json }
+  Write-ProgressLog 'update.channels.ok'
   Write-ProgressLog 'update.dashboard'
   Wait-DashboardReady
+  Write-ProgressLog 'update.dashboard.ok'
   Write-ProgressLog 'update.agent-turn'
   Invoke-CaptureLogged 'openclaw agent' { & $openclaw agent --agent main --session-id $SessionId --message 'Reply with exact ASCII text OK only.' --json } | Out-Null
+  Write-ProgressLog 'update.agent.ok'
   $exitCode = $LASTEXITCODE
   if ($null -eq $exitCode) {
     $exitCode = 0
@@ -1440,6 +1482,7 @@ if [ -n "$expected_needle" ]; then
 fi
 /opt/homebrew/bin/openclaw update status --json
 $(parallels_macos_permission_check_snippet)
+printf '==> update.permissions.ok\n'
 /opt/homebrew/bin/openclaw models set "$MODEL_ID"
 # Same-guest npm upgrades can leave launchd holding the old gateway process or
 # module graph briefly; wait for a fresh RPC-ready restart before the agent turn.
@@ -1469,7 +1512,9 @@ if [ "\$gateway_ready" != "1" ]; then
   tail -n 120 /tmp/openclaw-parallels-npm-update-macos-gateway.log 2>/dev/null || true
 fi
 /opt/homebrew/bin/openclaw gateway status --deep --require-rpc
+printf '==> update.gateway.ok\n'
 /opt/homebrew/bin/openclaw channels status --probe --json
+printf '==> update.channels.ok\n'
 dashboard_ready=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   if curl -fsSL --connect-timeout 2 --max-time 5 http://127.0.0.1:18789/ >/tmp/openclaw-parallels-npm-update-macos-dashboard.html 2>/dev/null; then
@@ -1486,7 +1531,9 @@ if [ "\$dashboard_ready" != "1" ]; then
   echo "macOS dashboard did not become ready after update" >&2
   exit 1
 fi
+printf '==> update.dashboard.ok\n'
 /opt/homebrew/bin/openclaw agent --agent main --session-id parallels-npm-update-macos-$expected_needle --message "Reply with exact ASCII text OK only." --json
+printf '==> update.agent.ok\n'
 EOF
   macos_desktop_user_exec /bin/bash /tmp/openclaw-main-update.sh
   MACOS_UPDATE_GATEWAY_STATUS="pass"
@@ -1600,6 +1647,7 @@ if [ -n "$expected_needle" ]; then
 fi
 openclaw update status --json
 $(parallels_linux_permission_check_snippet)
+printf '==> update.permissions.ok\n'
 openclaw models set "$MODEL_ID"
 # Linux update validation should prove the manual gateway comes back too, not
 # just that local agent mode still works with the provider key in env.
@@ -1623,7 +1671,9 @@ if [ "\$gateway_ready" != "1" ]; then
   exit 1
 fi
 openclaw gateway status --deep --require-rpc
+printf '==> update.gateway.ok\n'
 openclaw channels status --probe --json
+printf '==> update.channels.ok\n'
 dashboard_ready=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   if curl -fsSL --connect-timeout 2 --max-time 5 http://127.0.0.1:18789/ >/tmp/openclaw-parallels-npm-update-linux-dashboard.html 2>/dev/null; then
@@ -1640,7 +1690,9 @@ if [ "\$dashboard_ready" != "1" ]; then
   echo "Linux dashboard did not become ready after update" >&2
   exit 1
 fi
+printf '==> update.dashboard.ok\n'
 openclaw agent --local --agent main --session-id parallels-npm-update-linux-$expected_needle --message "Reply with exact ASCII text OK only." --json
+printf '==> update.agent.ok\n'
 EOF
   prlctl exec "$LINUX_VM" /usr/bin/env "$API_KEY_ENV=$API_KEY_VALUE" /bin/bash /tmp/openclaw-main-update.sh
   LINUX_UPDATE_GATEWAY_STATUS="pass"
