@@ -13,6 +13,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Telegram/media replies: parse remote markdown image syntax into outbound media payloads on the final reply path, so Telegram group chats stop falling back to plain-text image URLs when the model or a tool emits `![...](...)` instead of a `MEDIA:` token. (#66191) Thanks @apezam and @vincentkoc.
 - Memory/QMD: recreate stale managed QMD collections when startup repair finds the collection name already exists, so root memory narrows back to `MEMORY.md` instead of staying on broad workspace markdown indexing.
 - Agents/OpenAI: surface selected-model capacity failures from PI, Codex, and auto-reply harness paths with a model-switch hint instead of the generic empty-response error. Thanks @vincentkoc.
 - Providers/OpenAI: route `openai/gpt-image-2` through configured Codex OAuth directly when an `openai-codex` profile is active, instead of probing `OPENAI_API_KEY` first.
@@ -632,7 +633,6 @@ Docs: https://docs.openclaw.ai
 - Agents/subagents: emit the subagent registry lazy-runtime stub on the stable dist path that both source and bundled runtime imports resolve, so the follow-up dist fix no longer still fails with `ERR_MODULE_NOT_FOUND` at runtime. (#66420) Thanks @obviyus.
 - Media-understanding/proxy env: auto-upgrade provider HTTP helper requests to trusted env-proxy mode only when `HTTP_PROXY`/`HTTPS_PROXY` is active and the target is not bypassed by `NO_PROXY`, so remote media-understanding and transcription requests stop failing local DNS pre-resolution in proxy-only environments without widening SSRF bypasses. (#52162) Thanks @mjamiv and @vincentkoc.
 - Telegram/media downloads: let Telegram media fetches trust an operator-configured explicit proxy for target DNS resolution after hostname-policy checks, so proxy-backed installs stop failing `could not download media` on Bot API file downloads after the DNS-pinning regression. (#66245) Thanks @dawei41468 and @vincentkoc.
-- Telegram/media replies: parse markdown image syntax into outbound media payloads on the final reply path, so Telegram group chats stop falling back to plain-text image URLs when the model or a tool emits `![...](...)` instead of a `MEDIA:` token. (#66191) Thanks @apezam and @vincentkoc.
 - Browser: keep loopback CDP readiness checks reachable under strict SSRF defaults so OpenClaw can reconnect to locally started managed Chrome. (#66354) Thanks @hxy91819.
 - Agents/context engine: compact engine-owned sessions from the first tool-loop delta and preserve ingest fallback when `afterTurn` is absent, so long-running tool loops can stay bounded without dropping engine state. (#63555) Thanks @Bikkies.
 - OpenAI Codex/auth: keep malformed Codex CLI auth-file diagnostics on the debug logger instead of stdout so interactive command output stays clean while auth read failures remain traceable. (#66451) Thanks @SimbaKingjoe.
