@@ -137,6 +137,9 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
     expect(resolveExecutionModeForSuite("installer-fresh")).toBe("fresh");
     expect(resolveExecutionModeForSuite("packaged-upgrade")).toBe("upgrade");
     expect(resolveExecutionModeForSuite("dev-update")).toBe("upgrade");
+    expect(() => resolveExecutionModeForSuite("unknown-suite")).toThrow(
+      'Unsupported suite "unknown-suite" for execution mode resolution.',
+    );
   });
 
   it("can rebuild the Windows PATH with or without current-process entries", () => {
