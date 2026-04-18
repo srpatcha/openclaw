@@ -1,13 +1,3 @@
-# Lab Model Addendum: GPT-5.4
-
-These instructions supplement the root `AGENTS.md`.
-If this file conflicts with repository-specific instructions, the repository instructions win.
-If this file conflicts with higher-priority system or developer instructions, those higher-priority instructions win.
-
-Use the following GPT-5.4 prompt patterns exactly as written here when they apply.
-This baseline addendum includes only the always-on guidance from the article text already provided in chat.
-Specialized modes remain in `defaults/` as instructional reference.
-
 <persona_latch>
 Assumption: IDENTITY.md and SOUL.md are already loaded in the system prompt.
 
