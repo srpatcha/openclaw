@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import path from "node:path";
 /**
  * Lint: 运行时代码不得导入 config redact/restore 模块
  *
@@ -18,46 +19,41 @@
  * 注意：redactSensitiveUrl() / redactSensitiveUrlLikeString() 在运行时代码中
  * 用于日志/错误消息的 URL 脱敏是合理使用，不被此规则禁止。
  */
-
 import ts from "typescript";
 import { runCallsiteGuard } from "./lib/callsite-guard.mjs";
-import { runAsScript, resolveRepoRoot } from "./lib/ts-guard-utils.mjs";
+import { resolveRepoRoot, runAsScript } from "./lib/ts-guard-utils.mjs";
 
 /**
- * 运行时代码目录 — 这些目录的代码在运行时直接消费配置值，
- * 不应导入 config 级别的 redact/restore 函数。
- *
- * 覆盖所有 extensions/ 和 src/ 下的运行时消费方。
- * 不在此列表中的目录默认不受限制。
+ * Scan the repo-wide production surface instead of trying to enumerate every
+ * runtime directory. Redacted config helpers should only be imported from a
+ * small set of display/config surfaces; everything else is treated as runtime.
  */
-const RUNTIME_ROOTS = [
-  "extensions",       // 所有扩展 — 运行时通过 plugin-sdk/config-runtime 读取配置
-  "src/agents",       // agent 运行时（MCP 连接、模型调用等）
-  "src/auto-reply",   // 自动回复运行时
-  "src/channels",     // channel 运行时
-  "src/line",         // line 运行时
-  "src/routing",      // 路由运行时
-];
+const SOURCE_ROOTS = ["src", "extensions", "apps"];
 
 /**
- * 允许的例外目录 — 即使在 RUNTIME_ROOTS 下，这些子目录也允许导入，
- * 因为它们属于展示层而非运行时消费层。
+ * Only config display/writeback surfaces may import redact-snapshot helpers.
  */
-const ALLOWED_SUBPATHS = [
-  // src/agents 中 redactSensitiveUrlLikeString 用于日志脱敏，这是合理的运行时使用
-  // 但 redactConfigSnapshot/restoreRedactedValues 仍然被禁止
-  // 此处不需要列出例外 — 本规则按导入符号粒度控制，不按目录白名单
-];
+const ALLOWED_REDACT_SNAPSHOT_CALLSITES = new Set([
+  "src/cli/config-cli.ts",
+  "src/gateway/server-methods/config.ts",
+  "src/gateway/server-methods/talk.ts",
+]);
 
 /**
- * 从 redact-snapshot 导入时，被禁止的符号。
- * 这些函数仅用于 API/Display path。
+ * Only config metadata/redaction internals may import these schema helpers.
  */
+const ALLOWED_REDACT_SENSITIVE_URL_CALLSITES = new Set([
+  "src/config/redact-snapshot.ts",
+  "src/config/schema-base.ts",
+  "src/config/schema.hints.ts",
+]);
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
+
 const BANNED_FROM_REDACT_SNAPSHOT = new Set([
-  "redactConfigSnapshot",     // 替换整个 snapshot 中的敏感字段
-  "redactConfigObject",       // 替换 config 对象中的敏感字段
-  "restoreRedactedValues",    // 将 __OPENCLAW_REDACTED__ 还原为原始值
-  "REDACTED_SENTINEL",        // sentinel 常量
+  "redactConfigSnapshot", // 替换整个 snapshot 中的敏感字段
+  "redactConfigObject", // 替换 config 对象中的敏感字段
+  "restoreRedactedValues", // 将 __OPENCLAW_REDACTED__ 还原为原始值
+  "REDACTED_SENTINEL", // sentinel 常量
 ]);
 
 /**
@@ -69,27 +65,13 @@ const BANNED_FROM_REDACT_SNAPSHOT = new Set([
  * 以下函数仅用于 config redact 框架内部，运行时代码不应依赖：
  */
 const BANNED_FROM_REDACT_SENSITIVE_URL = new Set([
-  "isSensitiveUrlConfigPath",   // 判断配置路径是否为敏感 URL — 仅 config redact 框架需要
-  "hasSensitiveUrlHintTag",     // 检查 url-secret 标签 — 仅 config redact 框架需要
-  "SENSITIVE_URL_HINT_TAG",     // url-secret 常量 — 仅 config redact 框架需要
+  "isSensitiveUrlConfigPath", // 判断配置路径是否为敏感 URL — 仅 config redact 框架需要
+  "hasSensitiveUrlHintTag", // 检查 url-secret 标签 — 仅 config redact 框架需要
+  "SENSITIVE_URL_HINT_TAG", // url-secret 常量 — 仅 config redact 框架需要
 ]);
 
-/**
- * 允许从 redact-snapshot 导入的目录（不在 RUNTIME_ROOTS 中）。
- * 这些目录属于 API/Display path，导入 redact/restore 函数是合理的。
- *
- * 此列表仅供参考 — 本规则采用黑名单模式（只扫描 RUNTIME_ROOTS），
- * 不在此列表中的目录默认不受限制。
- */
-// const ALLOWED_ROOTS = [
-//   "src/config",        // redact 模块本身
-//   "src/gateway",       // config.get/set RPC handler
-//   "src/cli",           // CLI config get 输出
-//   "src/plugins",       // marketplace URL display
-//   "src/shared",        // redact-sensitive-url 工具函数
-// ];
-
 function findViolations(content, filePath) {
+  const relativePath = path.relative(REPO_ROOT, filePath).replaceAll(path.sep, "/");
   const sourceFile = ts.createSourceFile(
     filePath,
     content,
@@ -117,12 +99,21 @@ function findViolations(content, filePath) {
         return;
       }
 
+      const allowedCallsites = isRedactSnapshotImport
+        ? ALLOWED_REDACT_SNAPSHOT_CALLSITES
+        : ALLOWED_REDACT_SENSITIVE_URL_CALLSITES;
+      if (allowedCallsites.has(relativePath)) {
+        return;
+      }
+
       const bannedImports = isRedactSnapshotImport
         ? BANNED_FROM_REDACT_SNAPSHOT
         : BANNED_FROM_REDACT_SENSITIVE_URL;
 
       const importClause = node.importClause;
-      if (!importClause) return;
+      if (!importClause) {
+        return;
+      }
 
       // Named imports: import { a, b } from "..."
       if (importClause.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
@@ -150,12 +141,12 @@ function findViolations(content, filePath) {
 
 runAsScript(import.meta.url, async () => {
   await runCallsiteGuard({
-    sourceRoots: RUNTIME_ROOTS,
+    sourceRoots: SOURCE_ROOTS,
     header: [
-      "Config redact/restore functions must not be imported in runtime code.",
+      "Config redact/restore functions must only be imported in approved display/config code.",
       "",
-      "Runtime code (browser CDP, agents, channels, etc.) must use loadConfig() directly.",
-      "Redact/restore functions are only for API/Display path (config.get, CLI output).",
+      "Any code that executes with live config must use loadConfig() directly.",
+      "Redact/restore helpers are only for config display/writeback flows.",
       "",
       "Banned from redact-snapshot: redactConfigSnapshot, redactConfigObject,",
       "  restoreRedactedValues, REDACTED_SENTINEL",
@@ -165,23 +156,33 @@ runAsScript(import.meta.url, async () => {
       "Allowed in runtime: redactSensitiveUrl, redactSensitiveUrlLikeString",
       "  (for log/error URL redaction — this is legitimate runtime usage)",
       "",
-      "If you need to display a redacted URL in runtime status output, use the",
-      "display-level redactCdpUrl() helper or redactSensitiveUrl() instead of",
-      "the config redact framework.",
+      "Only these files may import redact-snapshot helpers:",
+      ...Array.from(ALLOWED_REDACT_SNAPSHOT_CALLSITES).map((path) => `  - ${path}`),
+      "Only these files may import config-path/url-hint helpers:",
+      ...Array.from(ALLOWED_REDACT_SENSITIVE_URL_CALLSITES).map((path) => `  - ${path}`),
       "",
       "Violations:",
     ].join("\n"),
-    footer: [
-      "",
-      "See: my_docs/04-cases/2026-04-18-config-read-write-dual-path/00-README.md",
-    ].join("\n"),
+    footer: ["", "See: my_docs/04-cases/2026-04-18-config-read-write-dual-path/00-README.md"].join(
+      "\n",
+    ),
     findCallLines: findViolations,
     importMetaUrl: import.meta.url,
     sortViolations: true,
     allowCallsite: () => false,
     skipRelativePath: (relPath) => {
-      if (relPath.includes(".test.") || relPath.includes(".spec.")) return true;
-      if (relPath.endsWith(".d.ts")) return true;
+      if (relPath.includes(".test.") || relPath.includes(".spec.")) {
+        return true;
+      }
+      if (relPath.includes("/test-helpers/")) {
+        return true;
+      }
+      if (relPath.endsWith(".test-helpers.ts")) {
+        return true;
+      }
+      if (relPath.endsWith(".d.ts")) {
+        return true;
+      }
       return false;
     },
   });

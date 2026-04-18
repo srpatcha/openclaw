@@ -21,10 +21,10 @@ import path from "node:path";
 
 // 以下 URL 字段名称模式不含凭据，不需要 redact
 const SAFE_URL_PATTERNS = [
-  /allowUrl$/i,          // allowlist 布尔值或列表，不含凭据
-  /urlAllowlist$/i,      // URL 白名单列表，不含凭据
+  /allowUrl$/i, // allowlist 布尔值或列表，不含凭据
+  /urlAllowlist$/i, // URL 白名单列表，不含凭据
   /allowExternalEmbed/i, // 允许嵌入的外部 URL 列表，不含凭据
-  /hookUrl$/i,           // 公开回调 URL（别人调你的地址），凭据在 token 字段中
+  /hookUrl$/i, // 公开回调 URL（别人调你的地址），凭据在 token 字段中
 ];
 
 function isSafeUrlField(key) {
@@ -70,10 +70,14 @@ function buildIsSensitiveUrlConfigPath(source) {
 
   return function isSensitiveUrlConfigPath(configPath) {
     for (const suffix of endsWithRules) {
-      if (configPath.endsWith(suffix)) return true;
+      if (configPath.endsWith(suffix)) {
+        return true;
+      }
     }
     for (const regex of regexRules) {
-      if (regex.test(configPath)) return true;
+      if (regex.test(configPath)) {
+        return true;
+      }
     }
     return false;
   };
@@ -83,18 +87,12 @@ async function run() {
   const repoRoot = path.resolve(import.meta.dirname, "..");
 
   // 读取 redact-sensitive-url.ts 源码，动态提取规则
-  const redactSourcePath = path.join(
-    repoRoot,
-    "src/shared/net/redact-sensitive-url.ts",
-  );
+  const redactSourcePath = path.join(repoRoot, "src/shared/net/redact-sensitive-url.ts");
   const redactSource = await fs.readFile(redactSourcePath, "utf8");
   const isSensitiveUrlConfigPath = buildIsSensitiveUrlConfigPath(redactSource);
 
   // 读取 schema.base.generated.ts，提取所有 URL 配置字段
-  const schemaPath = path.join(
-    repoRoot,
-    "src/config/schema.base.generated.ts",
-  );
+  const schemaPath = path.join(repoRoot, "src/config/schema.base.generated.ts");
   // 解析 schema.base.generated.ts，提取所有 URL 配置字段
   // 格式: "some.key": { label: "...", help: "...", tags: [...] },
   // 使用非贪婪匹配 + 缩进边界避免跨条目
@@ -109,14 +107,20 @@ async function run() {
     const body = match[2];
 
     // 只看键名中包含 Url / url 的字段
-    if (!/[Uu]rl/.test(key)) continue;
+    if (!/[Uu]rl/.test(key)) {
+      continue;
+    }
 
     // 跳过已知安全的字段
-    if (isSafeUrlField(key)) continue;
+    if (isSafeUrlField(key)) {
+      continue;
+    }
 
     // 从 body 中提取 tags
     const tagsMatch = body.match(/tags:\s*\[([^\]]*)\]/);
-    if (!tagsMatch) continue;
+    if (!tagsMatch) {
+      continue;
+    }
     const tags = tagsMatch[1]
       .split(",")
       .map((t) => t.trim().replace(/"/g, "").replace(/'/g, ""))
@@ -158,10 +162,7 @@ async function run() {
   }
 
   console.error(
-    [
-      "",
-      "See: my_docs/04-cases/2026-04-18-config-read-write-dual-path/00-README.md",
-    ].join("\n"),
+    ["", "See: my_docs/04-cases/2026-04-18-config-read-write-dual-path/00-README.md"].join("\n"),
   );
 
   process.exit(1);
