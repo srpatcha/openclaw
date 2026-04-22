@@ -156,4 +156,35 @@ struct ChannelsSettingsSmokeTests {
         let view = ChannelsSettings(store: store)
         _ = view.body
     }
+
+    @Test func `whatsapp login wait result keeps latest qr until connected`() {
+        let store = makeChannelsStore(channels: [:])
+        store.whatsappLoginQrDataUrl = "data:image/png;base64,initial"
+
+        store.applyWhatsAppLoginWaitResult(
+            WhatsAppLoginWaitResult(
+                connected: false,
+                message: "QR refreshed. Scan the latest code in WhatsApp → Linked Devices.",
+                qrDataUrl: "data:image/png;base64,rotated"))
+
+        #expect(store.whatsappLoginQrDataUrl == "data:image/png;base64,rotated")
+        #expect(store.whatsappLoginConnected == false)
+
+        store.applyWhatsAppLoginWaitResult(
+            WhatsAppLoginWaitResult(
+                connected: false,
+                message: "Still waiting for the QR scan. Let me know when you’ve scanned it.",
+                qrDataUrl: nil))
+
+        #expect(store.whatsappLoginQrDataUrl == "data:image/png;base64,rotated")
+
+        store.applyWhatsAppLoginWaitResult(
+            WhatsAppLoginWaitResult(
+                connected: true,
+                message: "✅ Linked! WhatsApp is ready.",
+                qrDataUrl: nil))
+
+        #expect(store.whatsappLoginQrDataUrl == nil)
+        #expect(store.whatsappLoginConnected == true)
+    }
 }

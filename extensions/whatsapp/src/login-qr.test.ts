@@ -39,7 +39,7 @@ vi.mock("./session.js", async () => {
 });
 
 vi.mock("./qr-image.js", () => ({
-  renderQrPngBase64: vi.fn(async () => "base64"),
+  renderQrPngBase64: vi.fn(async (input: string) => `encoded:${input}`),
 }));
 
 const createWaSocketMock = vi.mocked(createWaSocket);
@@ -51,6 +51,10 @@ const logoutWebMock = vi.mocked(logoutWeb);
 async function flushTasks() {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function waitMs(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 describe("login-qr", () => {
@@ -87,7 +91,7 @@ describe("login-qr", () => {
       .mockResolvedValueOnce(undefined);
 
     const start = await startWebLoginWithQr({ timeoutMs: 5000 });
-    expect(start.qrDataUrl).toBe("data:image/png;base64,base64");
+    expect(start.qrDataUrl).toBe("data:image/png;base64,encoded:qr-data");
 
     const resultPromise = waitForWebLogin({ timeoutMs: 5000 });
     await flushTasks();
@@ -107,7 +111,7 @@ describe("login-qr", () => {
     });
 
     const start = await startWebLoginWithQr({ timeoutMs: 5000 });
-    expect(start.qrDataUrl).toBe("data:image/png;base64,base64");
+    expect(start.qrDataUrl).toBe("data:image/png;base64,encoded:qr-data");
 
     const result = await waitForWebLogin({ timeoutMs: 5000 });
 
@@ -126,7 +130,7 @@ describe("login-qr", () => {
     logoutWebMock.mockRejectedValueOnce(new Error("cleanup failed"));
 
     const start = await startWebLoginWithQr({ timeoutMs: 5000 });
-    expect(start.qrDataUrl).toBe("data:image/png;base64,base64");
+    expect(start.qrDataUrl).toBe("data:image/png;base64,encoded:qr-data");
 
     const result = await waitForWebLogin({ timeoutMs: 5000 });
 
@@ -172,6 +176,36 @@ describe("login-qr", () => {
     await expect(waitForWebLogin({ timeoutMs: 1000 })).resolves.toEqual({
       connected: false,
       message: "No active WhatsApp login in progress.",
+    });
+  });
+
+  it("surfaces the latest QR after the socket rotates it", async () => {
+    createWaSocketMock.mockImplementationOnce(
+      async (
+        _printQr: boolean,
+        _verbose: boolean,
+        opts?: { authDir?: string; onQr?: (qr: string) => void },
+      ) => {
+        const sock = { ws: { close: vi.fn() } };
+        setImmediate(() => opts?.onQr?.("qr-data"));
+        setTimeout(() => opts?.onQr?.("qr-data-2"), 20);
+        return sock as never;
+      },
+    );
+    waitForWaConnectionMock.mockImplementation(() => new Promise(() => {}));
+
+    const start = await startWebLoginWithQr({ timeoutMs: 5000 });
+    expect(start.qrDataUrl).toBe("data:image/png;base64,encoded:qr-data");
+
+    const resultPromise = waitForWebLogin({ timeoutMs: 5000 });
+    await flushTasks();
+    await waitMs(40);
+    await flushTasks();
+
+    await expect(resultPromise).resolves.toEqual({
+      connected: false,
+      message: "QR refreshed. Scan the latest code in WhatsApp → Linked Devices.",
+      qrDataUrl: "data:image/png;base64,encoded:qr-data-2",
     });
   });
 });

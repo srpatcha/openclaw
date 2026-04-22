@@ -77,18 +77,25 @@ extension ChannelsStore {
         guard !self.whatsappBusy else { return }
         self.whatsappBusy = true
         defer { self.whatsappBusy = false }
+        let startedAt = Date()
         do {
-            let params: [String: AnyCodable] = [
-                "timeoutMs": AnyCodable(timeoutMs),
-            ]
-            let result: WhatsAppLoginWaitResult = try await GatewayConnection.shared.requestDecoded(
-                method: .webLoginWait,
-                params: params,
-                timeoutMs: Double(timeoutMs) + 5000)
-            self.whatsappLoginMessage = result.message
-            self.whatsappLoginConnected = result.connected
-            if result.connected {
-                self.whatsappLoginQrDataUrl = nil
+            while true {
+                let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+                let remainingMs = max(timeoutMs - elapsedMs, 0)
+                if remainingMs == 0 {
+                    break
+                }
+                let params: [String: AnyCodable] = [
+                    "timeoutMs": AnyCodable(remainingMs),
+                ]
+                let result: WhatsAppLoginWaitResult = try await GatewayConnection.shared.requestDecoded(
+                    method: .webLoginWait,
+                    params: params,
+                    timeoutMs: Double(remainingMs) + 5000)
+                self.applyWhatsAppLoginWaitResult(result)
+                if result.connected || result.qrDataUrl == nil {
+                    break
+                }
             }
         } catch {
             self.whatsappLoginMessage = error.localizedDescription
@@ -151,9 +158,10 @@ private struct WhatsAppLoginStartResult: Codable {
     let connected: Bool?
 }
 
-private struct WhatsAppLoginWaitResult: Codable {
+struct WhatsAppLoginWaitResult: Codable {
     let connected: Bool
     let message: String
+    let qrDataUrl: String?
 }
 
 private struct ChannelLogoutResult: Codable {
