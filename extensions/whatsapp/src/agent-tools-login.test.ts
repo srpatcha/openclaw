@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { waitForWebLogin } from "../login-qr-api.js";
+import { startWebLoginWithQr, waitForWebLogin } from "../login-qr-api.js";
 import { createWhatsAppLoginTool } from "./agent-tools-login.js";
 
 vi.mock("../login-qr-api.js", () => ({
@@ -7,6 +7,7 @@ vi.mock("../login-qr-api.js", () => ({
   waitForWebLogin: vi.fn(),
 }));
 
+const startWebLoginWithQrMock = vi.mocked(startWebLoginWithQr);
 const waitForWebLoginMock = vi.mocked(waitForWebLogin);
 
 describe("createWhatsAppLoginTool", () => {
@@ -14,7 +15,13 @@ describe("createWhatsAppLoginTool", () => {
     vi.clearAllMocks();
   });
 
-  it("re-emits refreshed QR images during wait actions", async () => {
+  it("passes the currently displayed QR back into wait actions", async () => {
+    const accountId = "account-1";
+    startWebLoginWithQrMock.mockResolvedValueOnce({
+      connected: false,
+      message: "Scan this QR in WhatsApp → Linked Devices.",
+      qrDataUrl: "data:image/png;base64,current-qr",
+    });
     waitForWebLoginMock.mockResolvedValueOnce({
       connected: false,
       message: "QR refreshed. Scan the latest code in WhatsApp → Linked Devices.",
@@ -22,12 +29,22 @@ describe("createWhatsAppLoginTool", () => {
     });
 
     const tool = createWhatsAppLoginTool();
+    await tool.execute("tool-call-1", {
+      action: "start",
+      timeoutMs: 5000,
+      accountId,
+    });
     const result = await tool.execute("tool-call-1", {
       action: "wait",
       timeoutMs: 5000,
+      accountId,
     });
 
-    expect(waitForWebLoginMock).toHaveBeenCalledWith({ timeoutMs: 5000 });
+    expect(waitForWebLoginMock).toHaveBeenCalledWith({
+      accountId,
+      timeoutMs: 5000,
+      currentQrDataUrl: "data:image/png;base64,current-qr",
+    });
     expect(result).toEqual({
       content: [
         {
@@ -45,6 +62,35 @@ describe("createWhatsAppLoginTool", () => {
         connected: false,
         qr: true,
       },
+    });
+  });
+
+  it("clears the tracked QR after a terminal wait result", async () => {
+    const accountId = "account-2";
+    startWebLoginWithQrMock.mockResolvedValueOnce({
+      connected: false,
+      message: "Scan this QR in WhatsApp → Linked Devices.",
+      qrDataUrl: "data:image/png;base64,current-qr",
+    });
+    waitForWebLoginMock.mockResolvedValueOnce({
+      connected: true,
+      message: "✅ Linked! WhatsApp is ready.",
+    });
+
+    const tool = createWhatsAppLoginTool();
+    await tool.execute("tool-call-start", { action: "start", accountId });
+    await tool.execute("tool-call-wait", { action: "wait", accountId });
+    waitForWebLoginMock.mockResolvedValueOnce({
+      connected: false,
+      message: "Still waiting for the QR scan. Let me know when you’ve scanned it.",
+    });
+
+    await tool.execute("tool-call-wait-2", { action: "wait", timeoutMs: 5000, accountId });
+
+    expect(waitForWebLoginMock).toHaveBeenNthCalledWith(2, {
+      accountId,
+      timeoutMs: 5000,
+      currentQrDataUrl: undefined,
     });
   });
 });

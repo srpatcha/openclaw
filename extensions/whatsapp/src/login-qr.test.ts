@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { startWebLoginWithQr, waitForWebLogin } from "./login-qr.js";
+import { renderQrPngBase64 } from "./qr-image.js";
 import {
   createWaSocket,
   logoutWeb,
@@ -47,6 +48,7 @@ const readWebAuthExistsForDecisionMock = vi.mocked(readWebAuthExistsForDecision)
 const readWebSelfIdMock = vi.mocked(readWebSelfId);
 const waitForWaConnectionMock = vi.mocked(waitForWaConnection);
 const logoutWebMock = vi.mocked(logoutWeb);
+const renderQrPngBase64Mock = vi.mocked(renderQrPngBase64);
 
 async function flushTasks() {
   await Promise.resolve();
@@ -226,6 +228,58 @@ describe("login-qr", () => {
       message: "QR refreshed. Scan the latest code in WhatsApp → Linked Devices.",
       qrDataUrl: "data:image/png;base64,encoded:qr-data-2",
     });
+  });
+
+  it("does not short-circuit on an existing QR when the waiter has no current QR image", async () => {
+    const accountId = "wait-without-current-qr";
+    waitForWaConnectionMock.mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve(undefined), 20)),
+    );
+
+    const start = await startWebLoginWithQr({
+      timeoutMs: 5000,
+      accountId,
+    });
+    expect(start.qrDataUrl).toBe("data:image/png;base64,encoded:qr-data");
+
+    await expect(
+      waitForWebLogin({
+        timeoutMs: 5000,
+        accountId,
+      }),
+    ).resolves.toEqual({
+      connected: true,
+      message: "✅ Linked! WhatsApp is ready.",
+    });
+  });
+
+  it("deduplicates initial QR rendering while the start path awaits the same image", async () => {
+    const accountId = "single-flight-qr";
+    let resolveRender: ((value: string) => void) | null = null;
+    renderQrPngBase64Mock.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveRender = resolve;
+        }),
+    );
+    waitForWaConnectionMock.mockImplementation(() => new Promise(() => {}));
+
+    const resultPromise = startWebLoginWithQr({
+      timeoutMs: 5000,
+      accountId,
+    });
+    await waitMs(0);
+    await flushTasks();
+    await flushTasks();
+
+    expect(renderQrPngBase64Mock).toHaveBeenCalledTimes(1);
+
+    resolveRender?.("encoded:qr-data");
+    await expect(resultPromise).resolves.toEqual({
+      qrDataUrl: "data:image/png;base64,encoded:qr-data",
+      message: "Scan this QR in WhatsApp → Linked Devices.",
+    });
+    expect(renderQrPngBase64Mock).toHaveBeenCalledTimes(1);
   });
 
   it("returns the same rotated QR to concurrent waiters that share the same current image", async () => {

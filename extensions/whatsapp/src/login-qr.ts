@@ -41,6 +41,7 @@ type ActiveLogin = {
   waitPromise: Promise<void>;
   qrUpdatePromise: Promise<void>;
   resolveQrUpdate: (() => void) | null;
+  qrRenderPromise: Promise<string> | null;
   verbose: boolean;
   runtime: RuntimeEnv;
 };
@@ -55,6 +56,7 @@ function waitForNextTask(): Promise<void> {
 }
 
 const ACTIVE_LOGIN_TTL_MS = 3 * 60_000;
+const MAX_QR_RENDER_CHASES = 10;
 const activeLogins = new Map<string, ActiveLogin>();
 
 function closeSocket(sock: WaSocket) {
@@ -101,40 +103,60 @@ async function ensureQrDataUrl(params: {
   qr: string;
   qrVersion: number;
 }): Promise<string> {
-  while (true) {
-    const current = activeLogins.get(params.accountId);
-    if (
-      current?.id === params.loginId &&
-      current.qrVersion === params.qrVersion &&
-      current.qr === params.qr
-    ) {
-      if (current.qrDataUrl) {
-        return current.qrDataUrl;
+  const current = activeLogins.get(params.accountId);
+  if (
+    current?.id !== params.loginId ||
+    current.qrVersion !== params.qrVersion ||
+    current.qr !== params.qr
+  ) {
+    const base64 = await renderQrPngBase64(params.qr);
+    return `data:image/png;base64,${base64}`;
+  }
+
+  if (current.qrDataUrl) {
+    return current.qrDataUrl;
+  }
+
+  if (current.qrRenderPromise) {
+    return await current.qrRenderPromise;
+  }
+
+  const renderPromise = (async () => {
+    for (let attempt = 0; attempt < MAX_QR_RENDER_CHASES; attempt += 1) {
+      const latest = activeLogins.get(params.accountId);
+      if (!latest || latest.id !== params.loginId || !latest.qr) {
+        throw new Error("WhatsApp QR is no longer active.");
+      }
+      if (latest.qrDataUrl) {
+        return latest.qrDataUrl;
+      }
+
+      const qr = latest.qr;
+      const qrVersion = latest.qrVersion;
+      const base64 = await renderQrPngBase64(qr);
+      const dataUrl = `data:image/png;base64,${base64}`;
+      const refreshed = activeLogins.get(params.accountId);
+      if (!refreshed || refreshed.id !== params.loginId) {
+        return dataUrl;
+      }
+      if (refreshed.qrVersion === qrVersion && refreshed.qr === qr) {
+        refreshed.qrDataUrl = dataUrl;
+        notifyQrUpdate(refreshed);
+        return dataUrl;
       }
     }
 
-    const base64 = await renderQrPngBase64(params.qr);
-    const dataUrl = `data:image/png;base64,${base64}`;
+    throw new Error("WhatsApp QR kept refreshing before the latest image could render.");
+  })();
+
+  current.qrRenderPromise = renderPromise;
+  try {
+    return await renderPromise;
+  } finally {
     const latest = activeLogins.get(params.accountId);
-    if (!latest || latest.id !== params.loginId) {
-      return dataUrl;
+    if (latest?.id === params.loginId && latest.qrRenderPromise === renderPromise) {
+      latest.qrRenderPromise = null;
     }
-    if (latest.qrVersion === params.qrVersion && latest.qr === params.qr) {
-      latest.qrDataUrl = dataUrl;
-      notifyQrUpdate(latest);
-      return dataUrl;
-    }
-
-    if (!latest.qr) {
-      return dataUrl;
-    }
-
-    params = {
-      accountId: params.accountId,
-      loginId: params.loginId,
-      qr: latest.qr,
-      qrVersion: latest.qrVersion,
-    };
   }
 }
 
@@ -346,6 +368,7 @@ export async function startWebLoginWithQr(
     qrVersion: 0,
     qrUpdatePromise: Promise.resolve(),
     resolveQrUpdate: null,
+    qrRenderPromise: null,
     verbose: Boolean(opts.verbose),
     runtime,
   };
@@ -387,13 +410,28 @@ export async function startWebLoginWithQr(
   }
 
   const qr = login.qr ?? loginStartResult.qr;
-  const qrVersion = login.qrVersion || 1;
-  const qrDataUrl = await ensureQrDataUrl({
-    accountId: account.accountId,
-    loginId: login.id,
-    qr,
-    qrVersion,
-  });
+  const qrVersion = login.qrVersion;
+  if (qrVersion === 0) {
+    await resetActiveLogin(account.accountId);
+    return {
+      message: "Failed to capture the active WhatsApp QR. Ask me to generate a new one.",
+    };
+  }
+
+  let qrDataUrl: string;
+  try {
+    qrDataUrl = await ensureQrDataUrl({
+      accountId: account.accountId,
+      loginId: login.id,
+      qr,
+      qrVersion,
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error ? `Failed to render the WhatsApp QR: ${err.message}` : String(err);
+    await resetActiveLogin(account.accountId, message);
+    return { message };
+  }
   return {
     qrDataUrl,
     message: "Scan this QR in WhatsApp → Linked Devices.",
@@ -432,7 +470,7 @@ export async function waitForWebLogin(
   const currentQrDataUrl = opts.currentQrDataUrl;
 
   while (true) {
-    if (login.qrDataUrl && login.qrDataUrl !== currentQrDataUrl) {
+    if (login.qrDataUrl && currentQrDataUrl && login.qrDataUrl !== currentQrDataUrl) {
       return {
         connected: false,
         message: "QR refreshed. Scan the latest code in WhatsApp → Linked Devices.",
