@@ -87,6 +87,35 @@ async function normalizeSentMediaUrlsForDedupe(params: {
   return normalizedUrls;
 }
 
+function shouldTraceWhatsAppReplyPayloads(params: {
+  replyToChannel?: OriginatingChannelType;
+  originatingChannel?: OriginatingChannelType;
+}): boolean {
+  return params.replyToChannel === "whatsapp" || params.originatingChannel === "whatsapp";
+}
+
+function hasMediaDirectiveCandidate(text: string | undefined): boolean {
+  return typeof text === "string" && /(?:^|\n)\s*media:/im.test(text);
+}
+
+function summarizeReplyPayloadNormalization(params: {
+  index: number;
+  original: ReplyPayload;
+  normalized: ReplyPayload;
+  renderable: boolean;
+}): string {
+  const rawReply = resolveSendableOutboundReplyParts(params.original);
+  const normalizedReply = resolveSendableOutboundReplyParts(params.normalized);
+  const preview = normalizedReply.trimmedText
+    ? JSON.stringify(normalizedReply.trimmedText.slice(0, 80))
+    : "<none>";
+  return `#${params.index + 1}{rawMedia=${rawReply.hasMedia ? "yes" : "no"},mediaDirective=${
+    hasMediaDirectiveCandidate(params.original.text) ? "yes" : "no"
+  },normalizedMedia=${normalizedReply.hasMedia ? "yes" : "no"},normalizedText=${
+    normalizedReply.hasText ? "yes" : "no"
+  },renderable=${params.renderable ? "yes" : "no"},preview=${preview}}`;
+}
+
 export async function buildReplyPayloads(params: {
   payloads: ReplyPayload[];
   isHeartbeat: boolean;
@@ -109,6 +138,10 @@ export async function buildReplyPayloads(params: {
   accountId?: string;
   normalizeMediaPaths?: (payload: ReplyPayload) => Promise<ReplyPayload>;
 }): Promise<{ replyPayloads: ReplyPayload[]; didLogHeartbeatStrip: boolean }> {
+  const traceWhatsAppPayloads = shouldTraceWhatsAppReplyPayloads({
+    replyToChannel: params.replyToChannel,
+    originatingChannel: params.originatingChannel,
+  });
   let didLogHeartbeatStrip = params.didLogHeartbeatStrip;
   const sanitizedPayloads = params.isHeartbeat
     ? params.payloads
@@ -134,28 +167,49 @@ export async function buildReplyPayloads(params: {
         return [{ ...payload, text: stripped.text }];
       });
 
-  const replyTaggedPayloads = (
-    await Promise.all(
-      applyReplyThreading({
-        payloads: sanitizedPayloads,
-        replyToMode: params.replyToMode,
-        replyToChannel: params.replyToChannel,
+  const normalizedPayloadEntries = await Promise.all(
+    applyReplyThreading({
+      payloads: sanitizedPayloads,
+      replyToMode: params.replyToMode,
+      replyToChannel: params.replyToChannel,
+      currentMessageId: params.currentMessageId,
+      replyThreading: params.replyThreading,
+    }).map(async (payload, index) => {
+      const parsed = normalizeReplyPayloadDirectives({
+        payload,
         currentMessageId: params.currentMessageId,
-        replyThreading: params.replyThreading,
-      }).map(async (payload) => {
-        const parsed = normalizeReplyPayloadDirectives({
-          payload,
-          currentMessageId: params.currentMessageId,
-          silentToken: SILENT_REPLY_TOKEN,
-          parseMode: "always",
-        }).payload;
-        return await normalizeReplyPayloadMedia({
-          payload: parsed,
-          normalizeMediaPaths: params.normalizeMediaPaths,
-        });
-      }),
-    )
-  ).filter(isRenderablePayload);
+        silentToken: SILENT_REPLY_TOKEN,
+        parseMode: "always",
+      }).payload;
+      const normalized = await normalizeReplyPayloadMedia({
+        payload: parsed,
+        normalizeMediaPaths: params.normalizeMediaPaths,
+      });
+      const renderable = isRenderablePayload(normalized);
+      return {
+        payload: normalized,
+        renderable,
+        summary: summarizeReplyPayloadNormalization({
+          index,
+          original: payload,
+          normalized,
+          renderable,
+        }),
+      };
+    }),
+  );
+  if (traceWhatsAppPayloads) {
+    const summary =
+      normalizedPayloadEntries.length > 0
+        ? normalizedPayloadEntries.map((entry) => entry.summary).join(" ")
+        : "count=0";
+    logVerbose(
+      `reply payload normalization (whatsapp): count=${normalizedPayloadEntries.length}${normalizedPayloadEntries.length > 0 ? ` ${summary}` : ""}`,
+    );
+  }
+  const replyTaggedPayloads = normalizedPayloadEntries
+    .filter((entry) => entry.renderable)
+    .map((entry) => entry.payload);
   const silentFilteredPayloads = params.silentExpected ? [] : replyTaggedPayloads;
 
   // Drop final payloads only when block streaming succeeded end-to-end.
@@ -224,10 +278,17 @@ export async function buildReplyPayloads(params: {
         ? mediaFilteredPayloads.filter((payload) => {
             const exactKey = createBlockReplyContentKey(payload);
             const keep = !params.directlySentBlockKeys!.has(exactKey);
-            const reply = resolveSendableOutboundReplyParts(payload);
-            if (reply.hasMedia) {
+            if (traceWhatsAppPayloads) {
+              const reply = resolveSendableOutboundReplyParts(payload);
+              const preview = reply.trimmedText
+                ? JSON.stringify(reply.trimmedText.slice(0, 80))
+                : "<none>";
               logVerbose(
-                `final reply direct-send dedupe: ${keep ? "kept" : "suppressed"} media payload; match=${keep ? "none" : "exact"}; hasText=${reply.trimmedText ? "yes" : "no"}`,
+                `reply final direct-block dedupe (whatsapp): keep=${keep ? "yes" : "no"} mediaItems=${
+                  reply.mediaCount
+                } text=${reply.hasText ? "yes" : "no"} directKeys=${
+                  params.directlySentBlockKeys!.size
+                } preview=${preview}`,
               );
             }
             return keep;

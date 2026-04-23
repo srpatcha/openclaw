@@ -113,6 +113,14 @@ export async function deliverWebReply(params: {
 
   // Media (with optional caption on first item)
   const leadingCaption = remainingText.shift() || "";
+  if (shouldLogVerbose() && mediaList.length > 0) {
+    const captionPreview = leadingCaption ? JSON.stringify(leadingCaption.slice(0, 80)) : "<none>";
+    logVerbose(
+      `WhatsApp auto-reply payload shape: mediaItems=${mediaList.length} textChunks=${textChunks.length} leadingCaption=${
+        leadingCaption ? "yes" : "no"
+      } trailingChunks=${remainingText.length} captionPreview=${captionPreview}`,
+    );
+  }
   await sendMediaWithLeadingCaption({
     mediaUrls: mediaList,
     caption: leadingCaption,

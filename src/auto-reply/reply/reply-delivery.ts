@@ -163,8 +163,12 @@ export function createBlockReplyDeliveryHandler(params: {
       // When block streaming is disabled, text-only block replies are accumulated into the
       // final response. Media cannot be reconstructed later, so send it immediately and let
       // the assistant's final text arrive through the normal final-reply path.
+      const reply = resolveSendableOutboundReplyParts(blockPayload);
+      const preview = reply.trimmedText ? JSON.stringify(reply.trimmedText.slice(0, 80)) : "<none>";
       logVerbose(
-        `block reply direct-media path (streaming disabled): originalText=${blockPayload.text ? "yes" : "no"} sentTextRemoved=${blockPayload.text ? "yes" : "no"} media=yes`,
+        `direct block media send before final accumulation: mediaItems=${reply.mediaCount} trackingText=${
+          reply.hasText ? "yes" : "no"
+        } sentPayloadText=no preview=${preview}`,
       );
       await sendDirectBlockReply({
         onBlockReply: params.onBlockReply,
