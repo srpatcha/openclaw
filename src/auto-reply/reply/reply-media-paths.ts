@@ -60,6 +60,10 @@ function resolveReplyMediaMaxBytes(params: {
     : MEDIA_MAX_BYTES;
 }
 
+function formatBlockedReplyMediaWarning(error: unknown): string {
+  return error instanceof Error ? `⚠️ Media failed: ${error.message}` : "⚠️ Media failed.";
+}
+
 export function createReplyMediaPathNormalizer(params: {
   cfg: OpenClawConfig;
   sessionKey?: string;
@@ -206,11 +210,13 @@ export function createReplyMediaPathNormalizer(params: {
 
     const normalizedMedia: string[] = [];
     const seen = new Set<string>();
+    let firstMediaDropError: unknown;
     for (const media of mediaList) {
       let normalized: string;
       try {
         normalized = await normalizeMediaSource(media);
       } catch (err) {
+        firstMediaDropError ??= err;
         logVerbose(`dropping blocked reply media ${media}: ${String(err)}`);
         continue;
       }
@@ -222,8 +228,12 @@ export function createReplyMediaPathNormalizer(params: {
     }
 
     if (normalizedMedia.length === 0) {
+      const warning = firstMediaDropError
+        ? formatBlockedReplyMediaWarning(firstMediaDropError)
+        : undefined;
       return {
         ...payload,
+        text: warning ? (payload.text ? `${payload.text}\n${warning}` : warning) : payload.text,
         mediaUrl: undefined,
         mediaUrls: undefined,
       };
