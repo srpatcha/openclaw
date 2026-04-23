@@ -6,6 +6,13 @@
     "mediaUnderstandingProviders": ["qwen"],
     "videoGenerationProviders": ["qwen"]
   },
+  "modelCatalog": {
+    "providers": ["qwen"],
+    "runtimeSuppressionHints": {
+      "qwen": ["qwen3.6-plus"],
+      "modelstudio": ["qwen3.6-plus"]
+    }
+  },
   "mediaUnderstandingProviderMetadata": {
     "qwen": {
       "capabilities": ["image", "video"],

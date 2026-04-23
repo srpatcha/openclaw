@@ -4,6 +4,9 @@
   "description": "Codex app-server harness and Codex-managed GPT model catalog.",
   "providers": ["codex"],
   "providerDiscoveryEntry": "./provider-discovery.ts",
+  "modelCatalog": {
+    "providers": ["codex"]
+  },
   "syntheticAuthRefs": ["codex"],
   "nonSecretAuthMarkers": ["codex-app-server"],
   "activation": {

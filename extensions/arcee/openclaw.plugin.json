@@ -2,6 +2,9 @@
   "id": "arcee",
   "enabledByDefault": true,
   "providers": ["arcee"],
+  "modelCatalog": {
+    "providers": ["arcee"]
+  },
   "providerAuthEnvVars": {
     "arcee": ["ARCEEAI_API_KEY"]
   },

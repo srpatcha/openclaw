@@ -132,6 +132,11 @@ export function resolveExternalAuthProfileProviderPluginIds(params: {
   });
 }
 
+/**
+ * @deprecated Compatibility path for third-party provider plugins that predate
+ * `contracts.externalAuthProviders`. Keep bundled plugins off this path and
+ * remove it with the runtime warning after the external plugin migration window.
+ */
 export function resolveExternalAuthProfileCompatFallbackPluginIds(params: {
   config?: PluginLoadOptions["config"];
   workspaceDir?: string;
@@ -156,6 +161,136 @@ export function resolveExternalAuthProfileCompatFallbackPluginIds(params: {
         normalizedConfig,
         rootConfig: params.config,
       }),
+  );
+}
+
+function pluginDeclaresModelCatalogProvider(
+  plugin: PluginManifestRecord,
+  provider: string,
+): boolean {
+  const normalized = normalizeProviderId(provider);
+  if (!normalized) {
+    return false;
+  }
+  return (plugin.modelCatalog?.providers ?? []).some(
+    (candidate) => normalizeProviderId(candidate) === normalized,
+  );
+}
+
+function pluginDeclaresAnyModelCatalogProvider(plugin: PluginManifestRecord): boolean {
+  return (plugin.modelCatalog?.providers?.length ?? 0) > 0;
+}
+
+function isBundledOrActivatedPlugin(
+  plugin: PluginManifestRecord,
+  normalizedConfig: NormalizedPluginsConfig,
+  rootConfig?: PluginLoadOptions["config"],
+): boolean {
+  if (plugin.origin === "bundled") {
+    return true;
+  }
+  return resolveEffectivePluginActivationState({
+    id: plugin.id,
+    origin: plugin.origin,
+    config: normalizedConfig,
+    rootConfig,
+    enabledByDefault: plugin.enabledByDefault,
+  }).activated;
+}
+
+function isActivatedPlugin(
+  plugin: PluginManifestRecord,
+  normalizedConfig: NormalizedPluginsConfig,
+  rootConfig?: PluginLoadOptions["config"],
+): boolean {
+  return resolveEffectivePluginActivationState({
+    id: plugin.id,
+    origin: plugin.origin,
+    config: normalizedConfig,
+    rootConfig,
+    enabledByDefault: plugin.enabledByDefault,
+  }).activated;
+}
+
+function isModelCatalogManifestEligible(
+  plugin: PluginManifestRecord,
+  normalizedConfig: NormalizedPluginsConfig,
+  rootConfig?: PluginLoadOptions["config"],
+): boolean {
+  return isBundledOrActivatedPlugin(plugin, normalizedConfig, rootConfig);
+}
+
+export function resolveDeclaredModelCatalogPluginIds(params: {
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] {
+  const registry = loadProviderManifestRegistry(params);
+  const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
+  return listManifestPluginIds(
+    registry,
+    (plugin) =>
+      (plugin.modelCatalog?.providers?.length ?? 0) > 0 &&
+      isModelCatalogManifestEligible(plugin, normalizedConfig, params.config),
+  );
+}
+
+export function resolveDeclaredModelCatalogPluginIdsForProvider(params: {
+  provider: string;
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] {
+  const provider = normalizeProviderId(params.provider);
+  if (!provider) {
+    return [];
+  }
+  const registry = loadProviderManifestRegistry(params);
+  const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
+  return listManifestPluginIds(
+    registry,
+    (plugin) =>
+      pluginDeclaresModelCatalogProvider(plugin, provider) &&
+      isModelCatalogManifestEligible(plugin, normalizedConfig, params.config),
+  );
+}
+
+export function resolveProviderDiscoveryEntryPluginIdsForProvider(params: {
+  provider: string;
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] {
+  const provider = normalizeProviderId(params.provider);
+  if (!provider) {
+    return [];
+  }
+  const registry = loadProviderManifestRegistry(params);
+  const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
+  return listManifestPluginIds(
+    registry,
+    (plugin) =>
+      Boolean(plugin.providerDiscoverySource) &&
+      plugin.providers.some((candidate) => normalizeProviderId(candidate) === provider) &&
+      pluginDeclaresModelCatalogProvider(plugin, provider) &&
+      isBundledOrActivatedPlugin(plugin, normalizedConfig, params.config),
+  );
+}
+
+export function resolveProviderDiscoveryEntryPluginIds(params: {
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] {
+  const registry = loadProviderManifestRegistry(params);
+  const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
+  return listManifestPluginIds(
+    registry,
+    (plugin) =>
+      Boolean(plugin.providerDiscoverySource) &&
+      plugin.providers.length > 0 &&
+      pluginDeclaresAnyModelCatalogProvider(plugin) &&
+      isActivatedPlugin(plugin, normalizedConfig, params.config),
   );
 }
 
@@ -472,17 +607,30 @@ export function resolveNonBundledProviderPluginIds(params: {
   );
 }
 
-export function resolveCatalogHookProviderPluginIds(params: {
+/**
+ * @deprecated Compatibility path for third-party provider plugins that predate
+ * `modelCatalog.providers`. Keep bundled plugins off this path and remove it
+ * after the external plugin migration window.
+ */
+export function resolveModelCatalogCompatFallbackPluginIds(params: {
   config?: PluginLoadOptions["config"];
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
+  declaredPluginIds?: ReadonlySet<string>;
+  provider?: string;
 }): string[] {
+  const declaredPluginIds = params.declaredPluginIds ?? new Set<string>();
+  const provider = params.provider ? normalizeProviderId(params.provider) : "";
   const registry = loadProviderManifestRegistry(params);
   const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
-  const enabledProviderPluginIds = listManifestPluginIds(
+  return listManifestPluginIds(
     registry,
     (plugin) =>
+      plugin.origin !== "bundled" &&
       plugin.providers.length > 0 &&
+      (!provider ||
+        plugin.providers.some((candidate) => normalizeProviderId(candidate) === provider)) &&
+      !declaredPluginIds.has(plugin.id) &&
       resolveEffectivePluginActivationState({
         id: plugin.id,
         origin: plugin.origin,
@@ -491,8 +639,76 @@ export function resolveCatalogHookProviderPluginIds(params: {
         enabledByDefault: plugin.enabledByDefault,
       }).activated,
   );
-  const bundledCompatPluginIds = resolveBundledProviderCompatPluginIds(params);
-  return [...new Set([...enabledProviderPluginIds, ...bundledCompatPluginIds])].toSorted(
-    (left, right) => left.localeCompare(right),
+}
+
+export function resolveCatalogHookProviderPluginIds(params: {
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] {
+  const declaredPluginIds = resolveDeclaredModelCatalogPluginIds(params);
+  const declaredPluginIdSet = new Set(declaredPluginIds);
+  const compatPluginIds = resolveModelCatalogCompatFallbackPluginIds({
+    config: params.config,
+    workspaceDir: params.workspaceDir,
+    env: params.env,
+    declaredPluginIds: declaredPluginIdSet,
+  });
+  return [...new Set([...declaredPluginIds, ...compatPluginIds])].toSorted((left, right) =>
+    left.localeCompare(right),
   );
+}
+
+export function resolveModelCatalogPluginIdsForProvider(params: {
+  provider: string;
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] | undefined {
+  const provider = normalizeProviderId(params.provider);
+  if (!provider) {
+    return undefined;
+  }
+  const declaredPluginIds = resolveDeclaredModelCatalogPluginIdsForProvider({
+    ...params,
+    provider,
+  });
+  if (declaredPluginIds.length > 0) {
+    return declaredPluginIds;
+  }
+
+  const registry = loadProviderManifestRegistry(params);
+  const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
+  const compatPluginIds = listManifestPluginIds(
+    registry,
+    (plugin) =>
+      plugin.origin !== "bundled" &&
+      plugin.providers.some((candidate) => normalizeProviderId(candidate) === provider) &&
+      resolveEffectivePluginActivationState({
+        id: plugin.id,
+        origin: plugin.origin,
+        config: normalizedConfig,
+        rootConfig: params.config,
+        enabledByDefault: plugin.enabledByDefault,
+      }).activated,
+  );
+  return compatPluginIds.length > 0 ? compatPluginIds : undefined;
+}
+
+export function resolveProviderStaticCatalogPluginIdsForProvider(params: {
+  provider: string;
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] | undefined {
+  const pluginIds = resolveProviderDiscoveryEntryPluginIdsForProvider(params);
+  return pluginIds.length > 0 ? pluginIds : undefined;
+}
+
+export function resolveProviderStaticCatalogPluginIds(params: {
+  config?: PluginLoadOptions["config"];
+  workspaceDir?: string;
+  env?: PluginLoadOptions["env"];
+}): string[] {
+  return resolveProviderDiscoveryEntryPluginIds(params);
 }

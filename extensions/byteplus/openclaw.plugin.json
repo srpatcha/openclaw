@@ -26,6 +26,9 @@
   "contracts": {
     "videoGenerationProviders": ["byteplus"]
   },
+  "modelCatalog": {
+    "providers": ["byteplus", "byteplus-plan"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

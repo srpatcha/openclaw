@@ -226,6 +226,8 @@ export type PluginManifest = {
     string,
     PluginManifestMediaUnderstandingProviderMetadata
   >;
+  /** Model-list/catalog metadata exposed before plugin runtime loads. */
+  modelCatalog?: PluginManifestModelCatalog;
   /** Manifest-owned config behavior consumed by generic core helpers. */
   configContracts?: PluginManifestConfigContracts;
   channelConfigs?: Record<string, PluginManifestChannelConfig>;
@@ -250,6 +252,20 @@ export type PluginManifestContracts = {
   webFetchProviders?: string[];
   webSearchProviders?: string[];
   tools?: string[];
+};
+
+export type PluginManifestModelCatalogSuppressions = Record<string, string[]>;
+
+export type PluginManifestModelCatalog = {
+  /**
+   * Provider ids whose plugin runtime contributes model catalog hooks, including
+   * supplemental catalog rows or model suppression rules.
+   */
+  providers?: string[];
+  /** Exact model ids that can be hidden without importing plugin runtime. */
+  staticSuppressions?: PluginManifestModelCatalogSuppressions;
+  /** Candidate model ids that may require runtime/config-aware suppression. */
+  runtimeSuppressionHints?: PluginManifestModelCatalogSuppressions;
 };
 
 export type PluginManifestMediaUnderstandingCapability = "image" | "audio" | "video";
@@ -457,6 +473,41 @@ function normalizeManifestContracts(value: unknown): PluginManifestContracts | u
   } satisfies PluginManifestContracts;
 
   return Object.keys(contracts).length > 0 ? contracts : undefined;
+}
+
+function normalizeModelCatalogSuppressions(
+  value: unknown,
+): PluginManifestModelCatalogSuppressions | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const normalized: PluginManifestModelCatalogSuppressions = {};
+  for (const [provider, models] of Object.entries(value)) {
+    const providerId = normalizeOptionalString(provider);
+    if (!providerId) {
+      continue;
+    }
+    const modelIds = normalizeTrimmedStringList(models);
+    if (modelIds.length > 0) {
+      normalized[providerId] = modelIds;
+    }
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeModelCatalog(value: unknown): PluginManifestModelCatalog | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const providers = normalizeTrimmedStringList(value.providers);
+  const staticSuppressions = normalizeModelCatalogSuppressions(value.staticSuppressions);
+  const runtimeSuppressionHints = normalizeModelCatalogSuppressions(value.runtimeSuppressionHints);
+  const modelCatalog = {
+    ...(providers.length > 0 ? { providers } : {}),
+    ...(staticSuppressions ? { staticSuppressions } : {}),
+    ...(runtimeSuppressionHints ? { runtimeSuppressionHints } : {}),
+  } satisfies PluginManifestModelCatalog;
+  return Object.keys(modelCatalog).length > 0 ? modelCatalog : undefined;
 }
 
 function isManifestConfigLiteral(value: unknown): value is PluginManifestConfigLiteral {
@@ -886,6 +937,7 @@ export function loadPluginManifest(
   const mediaUnderstandingProviderMetadata = normalizeMediaUnderstandingProviderMetadata(
     raw.mediaUnderstandingProviderMetadata,
   );
+  const modelCatalog = normalizeModelCatalog(raw.modelCatalog);
   const configContracts = normalizeManifestConfigContracts(raw.configContracts);
   const channelConfigs = normalizeChannelConfigs(raw.channelConfigs);
 
@@ -928,6 +980,7 @@ export function loadPluginManifest(
       uiHints,
       contracts,
       mediaUnderstandingProviderMetadata,
+      modelCatalog,
       configContracts,
       channelConfigs,
     },

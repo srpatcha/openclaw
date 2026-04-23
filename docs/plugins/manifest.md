@@ -172,6 +172,7 @@ Those belong in your plugin code and `package.json`.
 | `setup`                              | No       | `object`                         | Cheap setup/onboarding descriptors that discovery and setup surfaces can inspect without loading plugin runtime.                                                                                                                  |
 | `qaRunners`                          | No       | `object[]`                       | Cheap QA runner descriptors used by the shared `openclaw qa` host before plugin runtime loads.                                                                                                                                    |
 | `contracts`                          | No       | `object`                         | Static bundled capability snapshot for external auth hooks, speech, realtime transcription, realtime voice, media-understanding, image-generation, music-generation, video-generation, web-fetch, web search, and tool ownership. |
+| `modelCatalog`                       | No       | `object`                         | Cheap model-list/catalog metadata for provider catalog hooks and model suppression.                                                                                                                                               |
 | `mediaUnderstandingProviderMetadata` | No       | `Record<string, object>`         | Cheap media-understanding defaults for provider ids declared in `contracts.mediaUnderstandingProviders`.                                                                                                                          |
 | `channelConfigs`                     | No       | `Record<string, object>`         | Manifest-owned channel config metadata merged into discovery and validation surfaces before runtime loads.                                                                                                                        |
 | `skills`                             | No       | `string[]`                       | Skill directories to load, relative to the plugin root.                                                                                                                                                                           |
@@ -417,6 +418,43 @@ Provider plugins that implement `resolveExternalAuthProfiles` should declare
 `contracts.externalAuthProviders`. Plugins without the declaration still run
 through a deprecated compatibility fallback, but that fallback is slower and
 will be removed after the migration window.
+
+## modelCatalog reference
+
+Use `modelCatalog` only when a provider plugin changes model-list/catalog output.
+Do not use it to declare provider ownership; keep ownership in `providers`.
+
+```json
+{
+  "providers": ["openai", "openai-codex"],
+  "modelCatalog": {
+    "providers": ["openai", "openai-codex", "azure-openai-responses"],
+    "staticSuppressions": {
+      "openai": ["gpt-5.3-codex-spark"],
+      "azure-openai-responses": ["gpt-5.3-codex-spark"]
+    },
+    "runtimeSuppressionHints": {
+      "qwen": ["qwen3.6-plus"]
+    }
+  }
+}
+```
+
+Each field is optional:
+
+| Field                     | Type                       | What it means                                                                                                                                         |
+| ------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `providers`               | `string[]`                 | Provider ids whose plugin runtime contributes model catalog hooks such as supplemental catalog rows or suppression.                                   |
+| `staticSuppressions`      | `Record<string, string[]>` | Exact provider/model rows OpenClaw can hide without importing plugin runtime. Use only for unconditional suppressions.                                |
+| `runtimeSuppressionHints` | `Record<string, string[]>` | Provider/model candidates that may need config-aware runtime suppression. OpenClaw checks this before importing plugin runtime for suppression rules. |
+
+`models list` uses this metadata to keep read-only listing fast. Bundled plugins
+that implement `augmentModelCatalog` or `suppressBuiltInModel` should declare
+`modelCatalog.providers`. Static provider catalogs belong in a lightweight
+`providerDiscoveryEntry`, not in `modelCatalog`. Third-party provider plugins
+without `modelCatalog.providers` still run through a deprecated compatibility
+fallback for runtime catalog hooks, but that fallback is slower and will be
+removed after the migration window.
 
 ## mediaUnderstandingProviderMetadata reference
 

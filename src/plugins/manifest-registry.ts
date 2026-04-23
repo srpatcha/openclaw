@@ -33,6 +33,7 @@ import {
   type PluginManifest,
   type PluginManifestChannelConfig,
   type PluginManifestContracts,
+  type PluginManifestModelCatalog,
   type PluginManifestMediaUnderstandingProviderMetadata,
   type PluginManifestModelSupport,
   type PluginManifestProviderEndpoint,
@@ -136,6 +137,7 @@ export type PluginManifestRecord = {
     string,
     PluginManifestMediaUnderstandingProviderMetadata
   >;
+  modelCatalog?: PluginManifestModelCatalog;
   configContracts?: PluginManifestConfigContracts;
   channelConfigs?: Record<string, PluginManifestChannelConfig>;
   channelCatalogMeta?: {
@@ -386,6 +388,7 @@ function buildRecord(params: {
     configUiHints: params.manifest.uiHints,
     contracts: params.manifest.contracts,
     mediaUnderstandingProviderMetadata: params.manifest.mediaUnderstandingProviderMetadata,
+    modelCatalog: params.manifest.modelCatalog,
     configContracts: params.manifest.configContracts,
     channelConfigs,
     ...(params.candidate.packageManifest?.channel?.id

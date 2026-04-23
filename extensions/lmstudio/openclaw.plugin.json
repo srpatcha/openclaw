@@ -25,6 +25,9 @@
   "contracts": {
     "memoryEmbeddingProviders": ["lmstudio"]
   },
+  "modelCatalog": {
+    "providers": ["lmstudio"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

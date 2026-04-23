@@ -2,6 +2,9 @@
   "id": "tencent",
   "enabledByDefault": true,
   "providers": ["tencent-tokenhub"],
+  "modelCatalog": {
+    "providers": ["tencent-tokenhub"]
+  },
   "providerAuthEnvVars": {
     "tencent-tokenhub": ["TOKENHUB_API_KEY"]
   },
