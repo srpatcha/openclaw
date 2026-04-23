@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { hasConfiguredModelFallbacks, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -15,6 +16,7 @@ import {
 } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { resolveSessionTranscriptCandidates } from "../../gateway/session-utils.fs.js";
+import { logVerbose } from "../../globals.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
@@ -125,6 +127,20 @@ function hasTraceUsageFields(
     const value = usage[key as keyof typeof usage];
     return typeof value === "number" && Number.isFinite(value);
   });
+}
+
+function summarizeReplyPayloadsForLog(payloads: ReplyPayload[]): string {
+  if (payloads.length === 0) {
+    return "count=0";
+  }
+  const summary = payloads.map((payload, index) => {
+    const reply = resolveSendableOutboundReplyParts(payload);
+    const preview = reply.text ? JSON.stringify(reply.text.slice(0, 80)) : "<none>";
+    return `#${index + 1}{media=${reply.hasMedia ? "yes" : "no"},text=${
+      reply.trimmedText ? "yes" : "no"
+    },preview=${preview}}`;
+  });
+  return `count=${payloads.length} ${summary.join(" ")}`;
 }
 
 function formatTraceUsageLine(label: string, value: number | undefined): string {
@@ -1354,6 +1370,7 @@ export async function runReplyAgent(params: {
     }
 
     const currentMessageId = sessionCtx.MessageSidFull ?? sessionCtx.MessageSid;
+    logVerbose(`agent reply raw payloads: ${summarizeReplyPayloadsForLog(payloadArray)}`);
     const payloadResult = await buildReplyPayloads({
       payloads: payloadArray,
       isHeartbeat,
@@ -1380,6 +1397,7 @@ export async function runReplyAgent(params: {
     });
     const { replyPayloads } = payloadResult;
     didLogHeartbeatStrip = payloadResult.didLogHeartbeatStrip;
+    logVerbose(`agent reply final payloads: ${summarizeReplyPayloadsForLog(replyPayloads)}`);
 
     if (replyPayloads.length === 0) {
       return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
