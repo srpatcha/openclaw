@@ -10,6 +10,11 @@ import {
 } from "openclaw/plugin-sdk/channel-send-result";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resolveOutboundSendDep, sanitizeForPlainText } from "openclaw/plugin-sdk/infra-runtime";
+import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
+import {
+  normalizeWhatsAppOutboundPayload,
+  normalizeWhatsAppPayloadText,
+} from "./outbound-media-contract.js";
 import { WHATSAPP_LEGACY_OUTBOUND_SEND_DEP_KEYS } from "./outbound-send-deps.js";
 import { lookupInboundMessageMetaForTarget } from "./quoted-message.js";
 import { toWhatsappJid } from "./text-runtime.js";
@@ -34,6 +39,7 @@ type WhatsAppSendTextOptions = {
     participant?: string;
     messageText?: string;
   };
+  preserveLeadingWhitespace?: boolean;
 };
 type WhatsAppSendMessage = (
   to: string,
@@ -75,14 +81,28 @@ function resolveQuoteLookupAccountId(cfg?: OpenClawConfig, accountId?: string | 
   });
 }
 
+type WhatsAppOutboundBaseCore = Pick<
+  ChannelOutboundAdapter,
+  | "deliveryMode"
+  | "chunker"
+  | "chunkerMode"
+  | "textChunkLimit"
+  | "sanitizeText"
+  | "pollMaxOptions"
+  | "resolveTarget"
+  | "sendText"
+  | "sendMedia"
+  | "sendPoll"
+>;
+
 export function createWhatsAppOutboundBase({
   chunker,
   sendMessageWhatsApp,
   sendPollWhatsApp,
   shouldLogVerbose,
   resolveTarget,
-  normalizeText = (text) => text ?? "",
-  skipEmptyText = false,
+  normalizeText = normalizeWhatsAppPayloadText,
+  skipEmptyText = true,
 }: CreateWhatsAppOutboundBaseParams): Pick<
   ChannelOutboundAdapter,
   | "deliveryMode"
@@ -92,6 +112,7 @@ export function createWhatsAppOutboundBase({
   | "sanitizeText"
   | "pollMaxOptions"
   | "resolveTarget"
+  | "sendPayload"
   | "sendText"
   | "sendMedia"
   | "sendPoll"
@@ -116,7 +137,7 @@ export function createWhatsAppOutboundBase({
     };
   };
 
-  return {
+  const outbound: WhatsAppOutboundBaseCore = {
     deliveryMode: "gateway",
     chunker,
     chunkerMode: "text",
@@ -191,5 +212,17 @@ export function createWhatsAppOutboundBase({
           cfg,
         }),
     }),
+  };
+  return {
+    ...outbound,
+    sendPayload: async (ctx) =>
+      await sendTextMediaPayload({
+        channel: "whatsapp",
+        ctx: {
+          ...ctx,
+          payload: normalizeWhatsAppOutboundPayload(ctx.payload, { normalizeText }),
+        },
+        adapter: outbound,
+      }),
   };
 }
