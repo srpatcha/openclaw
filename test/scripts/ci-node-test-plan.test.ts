@@ -25,6 +25,40 @@ function listTestFiles(rootDir: string): string[] {
 }
 
 describe("scripts/lib/ci-node-test-plan.mjs", () => {
+  it("combines the small core unit shards to reduce CI runner fanout", () => {
+    const coreUnitShards = createNodeTestShards()
+      .filter((shard) => shard.shardName.startsWith("core-unit-"))
+      .map((shard) => ({
+        configs: shard.configs,
+        requiresDist: shard.requiresDist,
+        shardName: shard.shardName,
+      }));
+
+    expect(coreUnitShards).toEqual([
+      {
+        configs: [
+          "test/vitest/vitest.unit-fast.config.ts",
+          "test/vitest/vitest.unit-support.config.ts",
+        ],
+        requiresDist: false,
+        shardName: "core-unit-fast-support",
+      },
+      {
+        configs: [
+          "test/vitest/vitest.unit-src.config.ts",
+          "test/vitest/vitest.unit-security.config.ts",
+        ],
+        requiresDist: false,
+        shardName: "core-unit-src-security",
+      },
+      {
+        configs: ["test/vitest/vitest.unit-ui.config.ts"],
+        requiresDist: false,
+        shardName: "core-unit-ui",
+      },
+    ]);
+  });
+
   it("names the node shard checks as core test lanes", () => {
     const shards = createNodeTestShards();
 
@@ -73,6 +107,7 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
           "test/vitest/vitest.secrets.config.ts",
           "test/vitest/vitest.logging.config.ts",
           "test/vitest/vitest.process.config.ts",
+          "test/vitest/vitest.runtime-config.config.ts",
         ],
         requiresDist: false,
         shardName: "core-runtime-infra",
@@ -92,7 +127,6 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
         configs: [
           "test/vitest/vitest.acp.config.ts",
           "test/vitest/vitest.cron.config.ts",
-          "test/vitest/vitest.runtime-config.config.ts",
           "test/vitest/vitest.shared-core.config.ts",
           "test/vitest/vitest.tasks.config.ts",
           "test/vitest/vitest.utils.config.ts",
@@ -131,10 +165,7 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
     expect(agentShard).toEqual({
       checkName: "checks-node-agentic-agents",
       shardName: "agentic-agents",
-      configs: [
-        "test/vitest/vitest.agents.config.ts",
-        "test/vitest/vitest.gateway-client.config.ts",
-      ],
+      configs: ["test/vitest/vitest.agents.config.ts"],
       requiresDist: false,
     });
     expect(pluginSdkShard).toEqual({
@@ -142,6 +173,7 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
       shardName: "agentic-plugin-sdk",
       configs: [
         "test/vitest/vitest.gateway-core.config.ts",
+        "test/vitest/vitest.gateway-client.config.ts",
         "test/vitest/vitest.gateway-methods.config.ts",
         "test/vitest/vitest.plugin-sdk-light.config.ts",
         "test/vitest/vitest.plugin-sdk.config.ts",
