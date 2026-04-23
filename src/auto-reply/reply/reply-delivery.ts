@@ -4,7 +4,6 @@ import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-paylo
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { BlockReplyContext, ReplyPayload, ReplyThreadingPolicy } from "../types.js";
 import type { BlockReplyPipeline } from "./block-reply-pipeline.js";
-import { createBlockReplyContentKey } from "./block-reply-pipeline.js";
 import { parseReplyDirectives } from "./reply-directives.js";
 import { applyReplyTagsToPayload, isRenderablePayload } from "./reply-payloads.js";
 import type { TypingSignaler } from "./typing-mode.js";
@@ -66,11 +65,8 @@ function carryReplyPayloadMetadata(source: ReplyPayload, target: ReplyPayload): 
 
 async function sendDirectBlockReply(params: {
   onBlockReply: (payload: ReplyPayload, context?: BlockReplyContext) => Promise<void> | void;
-  directlySentBlockKeys: Set<string>;
-  trackingPayload: ReplyPayload;
   payload: ReplyPayload;
 }) {
-  params.directlySentBlockKeys.add(createBlockReplyContentKey(params.trackingPayload));
   await params.onBlockReply(params.payload);
 }
 
@@ -155,25 +151,6 @@ export function createBlockReplyDeliveryHandler(params: {
       // Track sent key to avoid duplicate in final payloads.
       await sendDirectBlockReply({
         onBlockReply: params.onBlockReply,
-        directlySentBlockKeys: params.directlySentBlockKeys,
-        trackingPayload: blockPayload,
-        payload: blockPayload,
-      });
-    } else if (blockHasMedia) {
-      // When block streaming is disabled, text-only block replies are accumulated into the
-      // final response. Media cannot be reconstructed later, so send the full media payload
-      // immediately and let the final reply dedupe collapse any exact duplicate.
-      const reply = resolveSendableOutboundReplyParts(blockPayload);
-      const preview = reply.trimmedText ? JSON.stringify(reply.trimmedText.slice(0, 80)) : "<none>";
-      logVerbose(
-        `direct block media send before final accumulation: mediaItems=${reply.mediaCount} trackingText=${
-          reply.hasText ? "yes" : "no"
-        } sentPayloadText=${reply.hasText ? "yes" : "no"} preview=${preview}`,
-      );
-      await sendDirectBlockReply({
-        onBlockReply: params.onBlockReply,
-        directlySentBlockKeys: params.directlySentBlockKeys,
-        trackingPayload: blockPayload,
         payload: blockPayload,
       });
     }

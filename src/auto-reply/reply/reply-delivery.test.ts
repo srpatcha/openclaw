@@ -1,7 +1,6 @@
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
-import { createBlockReplyContentKey } from "./block-reply-pipeline.js";
 import {
   createBlockReplyDeliveryHandler,
   normalizeReplyPayloadDirectives,
@@ -13,7 +12,7 @@ type BlockReplyPipelineLike = NonNullable<
 >;
 
 describe("createBlockReplyDeliveryHandler", () => {
-  it("sends media-bearing block replies with text intact when block streaming is disabled", async () => {
+  it("accumulates media-bearing block replies when block streaming is disabled", async () => {
     const onBlockReply = vi.fn(async () => {});
     const normalizeStreamingText = vi.fn((payload: { text?: string }) => ({
       text: payload.text,
@@ -40,24 +39,8 @@ describe("createBlockReplyDeliveryHandler", () => {
       replyToCurrent: true,
     });
 
-    expect(onBlockReply).toHaveBeenCalledWith({
-      text: "here's the vibe",
-      mediaUrl: "/tmp/generated.png",
-      mediaUrls: ["/tmp/generated.png"],
-      replyToCurrent: true,
-      replyToId: undefined,
-      replyToTag: undefined,
-      audioAsVoice: false,
-    });
-    expect(directlySentBlockKeys).toEqual(
-      new Set([
-        createBlockReplyContentKey({
-          text: "here's the vibe",
-          mediaUrls: ["/tmp/generated.png"],
-          replyToCurrent: true,
-        }),
-      ]),
-    );
+    expect(onBlockReply).not.toHaveBeenCalled();
+    expect(directlySentBlockKeys).toEqual(new Set());
     expect(typingSignals.signalTextDelta).toHaveBeenCalledWith("here's the vibe");
   });
 
