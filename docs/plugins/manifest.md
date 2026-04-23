@@ -450,8 +450,9 @@ Each field is optional:
 
 `models list` uses this metadata to keep read-only listing fast. Bundled plugins
 that implement `augmentModelCatalog` or `suppressBuiltInModel` should declare
-`modelCatalog.providers`. Static provider catalogs belong in a lightweight
-`providerDiscoveryEntry`, not in `modelCatalog`. Third-party provider plugins
+`modelCatalog.providers`. Static provider catalogs are resolved from provider
+ownership metadata first, then use `providerDiscoveryEntry` as an optional
+lightweight fast path when a plugin exports one. Third-party provider plugins
 without `modelCatalog.providers` still run through a deprecated compatibility
 fallback for runtime catalog hooks, but that fallback is slower and will be
 removed after the migration window.

@@ -21,6 +21,7 @@ const loadBuiltInCatalogModelsForList = vi.fn(async () => []);
 const loadProviderCatalogModelsForList = vi.fn<() => Promise<Array<Record<string, unknown>>>>(
   async () => [],
 );
+const augmentModelCatalogWithProviderPlugins = vi.fn(async () => []);
 const shouldSuppressBuiltInModel = vi.fn().mockReturnValue(false);
 const modelRegistryState = {
   models: [] as Array<Record<string, unknown>>,
@@ -77,6 +78,7 @@ vi.mock("./models/list.runtime.js", () => {
     loadBuiltInCatalogModelsForList,
     loadModelCatalog,
     loadProviderCatalogModelsForList,
+    augmentModelCatalogWithProviderPlugins,
     discoverAuthStorage: () => ({}) as unknown,
     discoverModels: () => new MockModelRegistry() as unknown,
     resolveModelWithRegistry: ({
@@ -143,6 +145,8 @@ beforeEach(() => {
   loadModelCatalog.mockResolvedValue([]);
   loadProviderCatalogModelsForList.mockReset();
   loadProviderCatalogModelsForList.mockResolvedValue([]);
+  augmentModelCatalogWithProviderPlugins.mockReset();
+  augmentModelCatalogWithProviderPlugins.mockResolvedValue([]);
   shouldSuppressBuiltInModel.mockReset();
   shouldSuppressBuiltInModel.mockReturnValue(false);
   readConfigFileSnapshotForWrite.mockClear();

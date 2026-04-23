@@ -1,6 +1,7 @@
 import { normalizeProviderId } from "../agents/provider-id.js";
 import { withBundledPluginVitestCompat } from "./bundled-compat.js";
 import { normalizePluginsConfig, resolveEffectivePluginActivationState } from "./config-state.js";
+import { resolveProviderContractPluginIdsForProviderAlias } from "./contracts/registry.js";
 import type { PluginLoadOptions } from "./loader.js";
 import {
   isActivatedManifestOwner,
@@ -673,10 +674,6 @@ export function resolveModelCatalogPluginIdsForProvider(params: {
     ...params,
     provider,
   });
-  if (declaredPluginIds.length > 0) {
-    return declaredPluginIds;
-  }
-
   const registry = loadProviderManifestRegistry(params);
   const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
   const compatPluginIds = listManifestPluginIds(
@@ -692,7 +689,8 @@ export function resolveModelCatalogPluginIdsForProvider(params: {
         enabledByDefault: plugin.enabledByDefault,
       }).activated,
   );
-  return compatPluginIds.length > 0 ? compatPluginIds : undefined;
+  const merged = dedupeSortedPluginIds([...declaredPluginIds, ...compatPluginIds]);
+  return merged.length > 0 ? merged : undefined;
 }
 
 export function resolveProviderStaticCatalogPluginIdsForProvider(params: {
@@ -701,7 +699,16 @@ export function resolveProviderStaticCatalogPluginIdsForProvider(params: {
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
 }): string[] | undefined {
-  const pluginIds = resolveProviderDiscoveryEntryPluginIdsForProvider(params);
+  const pluginIds = resolveDiscoverableProviderOwnerPluginIds({
+    pluginIds: dedupeSortedPluginIds([
+      ...(resolveOwningPluginIdsForProvider(params) ?? []),
+      ...(resolveProviderContractPluginIdsForProviderAlias(params.provider) ?? []),
+    ]),
+    config: params.config,
+    workspaceDir: params.workspaceDir,
+    env: params.env,
+    includeUntrustedWorkspacePlugins: false,
+  });
   return pluginIds.length > 0 ? pluginIds : undefined;
 }
 
@@ -710,5 +717,10 @@ export function resolveProviderStaticCatalogPluginIds(params: {
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
 }): string[] {
-  return resolveProviderDiscoveryEntryPluginIds(params);
+  return resolveDiscoveredProviderPluginIds({
+    config: params.config,
+    workspaceDir: params.workspaceDir,
+    env: params.env,
+    includeUntrustedWorkspacePlugins: false,
+  });
 }

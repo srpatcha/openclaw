@@ -18,6 +18,8 @@ import { isRecord } from "../utils.js";
 import {
   ensureAuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
+  loadAuthProfileStoreForSecretsRuntime,
+  loadAuthProfileStoreWithoutExternalProfiles,
 } from "./auth-profiles/store.js";
 import { resolveProviderEnvApiKeyCandidates } from "./model-auth-env-vars.js";
 import { resolveEnvApiKey } from "./model-auth-env.js";
@@ -348,8 +350,11 @@ export function resolvePiCredentialsForDiscovery(
   options?: DiscoverAuthStorageOptions,
 ): PiCredentialMap {
   const providerFilter = options?.providerFilter ? normalizeProviderId(options.providerFilter) : "";
-  const store =
-    options?.externalProfiles === false
+  const store = options?.readOnly
+    ? options?.externalProfiles === false
+      ? loadAuthProfileStoreWithoutExternalProfiles(agentDir)
+      : loadAuthProfileStoreForSecretsRuntime(agentDir)
+    : options?.externalProfiles === false
       ? ensureAuthProfileStoreWithoutExternalProfiles(agentDir, { allowKeychainPrompt: false })
       : ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
   const storeCredentials = filterPiCredentialsByProvider(

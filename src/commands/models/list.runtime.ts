@@ -1,4 +1,4 @@
-export { ensureAuthProfileStoreWithoutExternalProfiles as ensureAuthProfileStore } from "../../agents/auth-profiles/store.js";
+export { loadAuthProfileStoreForSecretsRuntime as ensureAuthProfileStore } from "../../agents/auth-profiles/store.js";
 export { resolveOpenClawAgentDir } from "../../agents/agent-paths.js";
 export { listProfilesForProvider } from "../../agents/auth-profiles.js";
 export {
@@ -7,6 +7,7 @@ export {
   resolveEnvApiKey,
 } from "../../agents/model-auth.js";
 export { loadModelCatalog } from "../../agents/model-catalog.js";
+export { augmentModelCatalogWithProviderPlugins } from "../../plugins/provider-runtime.runtime.js";
 import { normalizeProviderId } from "../../agents/provider-id.js";
 export { resolveModelWithRegistry } from "../../agents/pi-embedded-runner/model.js";
 export { discoverAuthStorage, discoverModels } from "../../agents/pi-model-discovery.js";

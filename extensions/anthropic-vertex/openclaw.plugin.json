@@ -5,6 +5,9 @@
   "providerDiscoveryEntry": "./provider-discovery.ts",
   "syntheticAuthRefs": ["anthropic-vertex"],
   "nonSecretAuthMarkers": ["gcp-vertex-credentials"],
+  "modelCatalog": {
+    "providers": ["anthropic-vertex"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

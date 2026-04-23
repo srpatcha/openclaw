@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => {
     loadModelCatalog: vi.fn(),
     loadBuiltInCatalogModelsForList: vi.fn(),
     loadProviderCatalogModelsForList: vi.fn(),
+    augmentModelCatalogWithProviderPlugins: vi.fn(),
     resolveConfiguredEntries: vi.fn(),
     printModelTable: vi.fn(),
     listProfilesForProvider: vi.fn(),
@@ -88,6 +89,7 @@ function resetMocks() {
   mocks.loadModelCatalog.mockResolvedValue([]);
   mocks.loadBuiltInCatalogModelsForList.mockResolvedValue([]);
   mocks.loadProviderCatalogModelsForList.mockResolvedValue([]);
+  mocks.augmentModelCatalogWithProviderPlugins.mockResolvedValue([]);
   mocks.resolveConfiguredEntries.mockReturnValue({
     entries: [
       {
@@ -153,6 +155,7 @@ function installModelsListCommandForwardCompatMocks() {
     loadBuiltInCatalogModelsForList: mocks.loadBuiltInCatalogModelsForList,
     loadModelCatalog: mocks.loadModelCatalog,
     loadProviderCatalogModelsForList: mocks.loadProviderCatalogModelsForList,
+    augmentModelCatalogWithProviderPlugins: mocks.augmentModelCatalogWithProviderPlugins,
     resolveModelWithRegistry: mocks.resolveModelWithRegistry,
     resolveEnvApiKey: vi.fn().mockReturnValue(undefined),
     resolveAwsSdkEnvVarName: vi.fn().mockReturnValue(undefined),
@@ -394,7 +397,7 @@ describe("modelsListCommand forward-compat", () => {
   });
 
   describe("availability fallback", () => {
-    it("marks synthetic codex gpt-5.4 rows as available when provider auth exists", async () => {
+    it("does not mark configured codex gpt-5.4 rows as available from provider auth alone", async () => {
       mocks.listProfilesForProvider.mockImplementation((_: unknown, provider: string) =>
         provider === "openai-codex"
           ? ([{ id: "profile-1" }] as Array<Record<string, unknown>>)
@@ -408,7 +411,7 @@ describe("modelsListCommand forward-compat", () => {
       expect(lastPrintedRows<{ key: string; available: boolean }>()).toContainEqual(
         expect.objectContaining({
           key: "openai-codex/gpt-5.4",
-          available: true,
+          available: false,
         }),
       );
     });
@@ -495,6 +498,15 @@ describe("modelsListCommand forward-compat", () => {
           ? ([{ id: "profile-1" }] as Array<Record<string, unknown>>)
           : [],
       );
+      mocks.augmentModelCatalogWithProviderPlugins.mockResolvedValueOnce([
+        {
+          provider: "openai-codex",
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          input: ["text"],
+          contextWindow: 400000,
+        },
+      ]);
       mocks.resolveModelWithRegistry.mockImplementation(
         ({ provider, modelId }: { provider: string; modelId: string }) => {
           if (provider !== "openai-codex") {

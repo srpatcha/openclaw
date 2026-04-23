@@ -4,6 +4,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { AuthProfileStore } from "../../agents/auth-profiles/types.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
+import type { ModelCatalogEntry, ModelInputType } from "../../agents/model-catalog.js";
 import {
   createBuiltInModelSuppressor,
   type BuiltInModelSuppressor,
@@ -15,6 +16,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ListRowModel } from "./list.model-row.js";
 import { loadModelRegistry, toModelRow } from "./list.registry.js";
 import {
+  augmentModelCatalogWithProviderPlugins,
   loadBuiltInCatalogModelsForList,
   loadModelCatalog,
   loadProviderCatalogModelsForList,
@@ -95,6 +97,10 @@ function ensureBuiltInModelSuppressor(context: RowBuilderContext): BuiltInModelS
     providerFilter: context.filter.provider,
   });
   return context.suppressBuiltInModel;
+}
+
+function shouldAllowProviderAvailabilityFallback(context: RowBuilderContext, key: string): boolean {
+  return context.availableKeys === undefined && !context.discoveredKeys.has(key);
 }
 
 function isLegacyFoundryVisionModelCandidate(params: {
@@ -417,11 +423,78 @@ export function appendConfiguredProviderRows(params: {
           model,
           key,
           context: params.context,
-          allowProviderAvailabilityFallback: true,
+          allowProviderAvailabilityFallback: shouldAllowProviderAvailabilityFallback(
+            params.context,
+            key,
+          ),
         }),
       );
       params.seenKeys.add(key);
     }
+  }
+}
+
+async function appendAugmentedCatalogRows(params: {
+  rows: ModelRow[];
+  context: RowBuilderContext;
+  seenKeys: Set<string>;
+}): Promise<void> {
+  const entries: ModelCatalogEntry[] = params.rows
+    .filter((row) => !row.missing)
+    .map((row) => {
+      const [provider, ...idParts] = row.key.split("/");
+      const input: ModelInputType[] =
+        row.input === "-"
+          ? ["text"]
+          : row.input
+              .split("+")
+              .filter(
+                (item): item is ModelInputType =>
+                  item === "text" || item === "image" || item === "document",
+              );
+      return {
+        provider,
+        id: idParts.join("/"),
+        name: row.name,
+        contextWindow: row.contextWindow ?? undefined,
+        input,
+      };
+    });
+  const supplemental = await augmentModelCatalogWithProviderPlugins({
+    config: params.context.cfg,
+    env: process.env,
+    providerFilter: params.context.filter.provider,
+    context: {
+      config: params.context.cfg,
+      agentDir: params.context.agentDir,
+      env: process.env,
+      entries,
+    },
+  });
+  for (const entry of supplemental) {
+    const key = modelKey(entry.provider, entry.id);
+    if (params.seenKeys.has(key)) {
+      continue;
+    }
+    const model = toCatalogListModel(entry);
+    if (!matchesRowFilter(params.context.filter, model)) {
+      continue;
+    }
+    if (shouldSuppressListModel({ model, context: params.context })) {
+      continue;
+    }
+    params.rows.push(
+      buildRow({
+        model,
+        key,
+        context: params.context,
+        allowProviderAvailabilityFallback: shouldAllowProviderAvailabilityFallback(
+          params.context,
+          key,
+        ),
+      }),
+    );
+    params.seenKeys.add(key);
   }
 }
 
@@ -498,6 +571,7 @@ export async function appendCatalogSupplementRows(params: {
     context: params.context,
     seenKeys: params.seenKeys,
   });
+  await appendAugmentedCatalogRows(params);
 }
 
 export async function appendProviderCatalogRows(params: {
@@ -526,7 +600,10 @@ export async function appendProviderCatalogRows(params: {
         model,
         key,
         context: params.context,
-        allowProviderAvailabilityFallback: !params.context.discoveredKeys.has(key),
+        allowProviderAvailabilityFallback: shouldAllowProviderAvailabilityFallback(
+          params.context,
+          key,
+        ),
       }),
     );
     params.seenKeys.add(key);
@@ -575,7 +652,10 @@ export function appendConfiguredRows(params: {
         cfg: params.context.cfg,
         authStore: params.context.authStore,
         allowProviderAvailabilityFallback: model
-          ? !params.context.discoveredKeys.has(modelKey(model.provider, model.id))
+          ? shouldAllowProviderAvailabilityFallback(
+              params.context,
+              modelKey(model.provider, model.id),
+            )
           : false,
       }),
     );
