@@ -267,6 +267,30 @@ describe("buildReplyPayloads media filter integration", () => {
     expect(replyPayloads).toHaveLength(0);
   });
 
+  it("suppresses a caption-bearing final payload when the media-only block reply was already sent directly", async () => {
+    // WhatsApp can split a media reply into a direct media send plus a later
+    // final caption payload. The later payload should be dropped here.
+    const { createBlockReplyContentKey } = await import("./block-reply-pipeline.js");
+    const directlySentBlockKeys = new Set<string>();
+    directlySentBlockKeys.add(
+      createBlockReplyContentKey({
+        mediaUrl: "file:///tmp/photo.jpg",
+        mediaUrls: ["file:///tmp/photo.jpg"],
+      }),
+    );
+
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      blockStreamingEnabled: false,
+      blockReplyPipeline: null,
+      directlySentBlockKeys,
+      replyToMode: "off",
+      payloads: [{ text: "caption text", mediaUrl: "file:///tmp/photo.jpg" }],
+    });
+
+    expect(replyPayloads).toHaveLength(0);
+  });
+
   it("does not suppress same-target replies when accountId differs", async () => {
     const { replyPayloads } = await buildReplyPayloads({
       ...baseParams,

@@ -221,9 +221,17 @@ export async function buildReplyPayloads(params: {
           (payload) => !params.blockReplyPipeline?.hasSentPayload(payload),
         )
       : params.directlySentBlockKeys?.size
-        ? mediaFilteredPayloads.filter(
-            (payload) => !params.directlySentBlockKeys!.has(createBlockReplyContentKey(payload)),
-          )
+        ? mediaFilteredPayloads.filter((payload) => {
+            const exactKey = createBlockReplyContentKey(payload);
+            const keep = !params.directlySentBlockKeys!.has(exactKey);
+            const reply = resolveSendableOutboundReplyParts(payload);
+            if (reply.hasMedia) {
+              logVerbose(
+                `final reply direct-send dedupe: ${keep ? "kept" : "suppressed"} media payload; match=${keep ? "none" : "exact"}; hasText=${reply.trimmedText ? "yes" : "no"}`,
+              );
+            }
+            return keep;
+          })
         : mediaFilteredPayloads;
   const replyPayloads = suppressMessagingToolReplies ? [] : filteredPayloads;
 
