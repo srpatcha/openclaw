@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { hasConfiguredModelFallbacks, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -15,6 +16,7 @@ import {
 } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { resolveSessionTranscriptCandidates } from "../../gateway/session-utils.fs.js";
+import { logVerbose } from "../../globals.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
@@ -125,6 +127,27 @@ function hasTraceUsageFields(
     const value = usage[key as keyof typeof usage];
     return typeof value === "number" && Number.isFinite(value);
   });
+}
+
+function shouldTraceWhatsAppReplyFlow(channel: OriginatingChannelType | undefined): boolean {
+  return channel === "whatsapp";
+}
+
+function hasMediaDirectiveCandidate(text: string | undefined): boolean {
+  return typeof text === "string" && /(?:^|\n)\s*media:/im.test(text);
+}
+
+function summarizeReplyPayloadsForTrace(payloads: ReplyPayload[]): string {
+  if (payloads.length === 0) {
+    return "count=0";
+  }
+  return `count=${payloads.length} ${payloads
+    .map((payload, index) => {
+      const reply = resolveSendableOutboundReplyParts(payload);
+      const preview = reply.trimmedText ? JSON.stringify(reply.trimmedText.slice(0, 80)) : "<none>";
+      return `#${index + 1}{media=${reply.hasMedia ? "yes" : "no"},text=${reply.hasText ? "yes" : "no"},preview=${preview}}`;
+    })
+    .join(" ")}`;
 }
 
 function formatTraceUsageLine(label: string, value: number | undefined): string {
@@ -1264,6 +1287,27 @@ export async function runReplyAgent(params: {
     }
 
     const payloadArray = runResult.payloads ?? [];
+    const traceWhatsAppReplyFlow = shouldTraceWhatsAppReplyFlow(replyToChannel);
+    if (traceWhatsAppReplyFlow) {
+      const finalAssistantRawText = runResult.meta?.finalAssistantRawText;
+      const finalAssistantVisibleText = runResult.meta?.finalAssistantVisibleText;
+      const rawPreview = finalAssistantRawText
+        ? JSON.stringify(finalAssistantRawText.slice(0, 160))
+        : "<none>";
+      const visiblePreview = finalAssistantVisibleText
+        ? JSON.stringify(finalAssistantVisibleText.slice(0, 160))
+        : "<none>";
+      logVerbose(
+        `assistant final text before payload parsing (whatsapp): rawMediaDirective=${
+          hasMediaDirectiveCandidate(finalAssistantRawText) ? "yes" : "no"
+        } visibleMediaDirective=${
+          hasMediaDirectiveCandidate(finalAssistantVisibleText) ? "yes" : "no"
+        } rawPreview=${rawPreview} visiblePreview=${visiblePreview}`,
+      );
+      logVerbose(
+        `assistant payloads before reply normalization (whatsapp): ${summarizeReplyPayloadsForTrace(payloadArray)}`,
+      );
+    }
 
     if (blockReplyPipeline) {
       await blockReplyPipeline.flush({ force: true });
