@@ -161,20 +161,20 @@ export function createBlockReplyDeliveryHandler(params: {
       });
     } else if (blockHasMedia) {
       // When block streaming is disabled, text-only block replies are accumulated into the
-      // final response. Media cannot be reconstructed later, so send it immediately and let
-      // the assistant's final text arrive through the normal final-reply path.
+      // final response. Media cannot be reconstructed later, so send the full media payload
+      // immediately and let the final reply dedupe collapse any exact duplicate.
       const reply = resolveSendableOutboundReplyParts(blockPayload);
       const preview = reply.trimmedText ? JSON.stringify(reply.trimmedText.slice(0, 80)) : "<none>";
       logVerbose(
         `direct block media send before final accumulation: mediaItems=${reply.mediaCount} trackingText=${
           reply.hasText ? "yes" : "no"
-        } sentPayloadText=no preview=${preview}`,
+        } sentPayloadText=${reply.hasText ? "yes" : "no"} preview=${preview}`,
       );
       await sendDirectBlockReply({
         onBlockReply: params.onBlockReply,
         directlySentBlockKeys: params.directlySentBlockKeys,
         trackingPayload: blockPayload,
-        payload: { ...blockPayload, text: undefined },
+        payload: blockPayload,
       });
     }
     // When streaming is disabled entirely, text-only blocks are accumulated in final text.

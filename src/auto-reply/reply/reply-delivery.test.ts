@@ -13,7 +13,7 @@ type BlockReplyPipelineLike = NonNullable<
 >;
 
 describe("createBlockReplyDeliveryHandler", () => {
-  it("sends media-bearing block replies even when block streaming is disabled", async () => {
+  it("sends media-bearing block replies with text intact when block streaming is disabled", async () => {
     const onBlockReply = vi.fn(async () => {});
     const normalizeStreamingText = vi.fn((payload: { text?: string }) => ({
       text: payload.text,
@@ -41,7 +41,7 @@ describe("createBlockReplyDeliveryHandler", () => {
     });
 
     expect(onBlockReply).toHaveBeenCalledWith({
-      text: undefined,
+      text: "here's the vibe",
       mediaUrl: "/tmp/generated.png",
       mediaUrls: ["/tmp/generated.png"],
       replyToCurrent: true,
