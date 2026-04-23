@@ -57,9 +57,6 @@ function mockSingleOpenAiCatalogModel() {
 
 describe("loadModelCatalog", () => {
   beforeAll(async () => {
-    vi.doMock("./models-config.js", () => ({
-      ensureOpenClawModelsJson: vi.fn().mockResolvedValue({ agentDir: "/tmp", wrote: false }),
-    }));
     vi.doMock("./agent-paths.js", () => ({
       resolveOpenClawAgentDir: () => "/tmp/openclaw",
     }));
@@ -88,7 +85,6 @@ describe("loadModelCatalog", () => {
   });
 
   afterAll(() => {
-    vi.doUnmock("./models-config.js");
     vi.doUnmock("./agent-paths.js");
     vi.doUnmock("../plugins/provider-runtime.runtime.js");
   });
@@ -347,6 +343,25 @@ describe("loadModelCatalog", () => {
     expect(
       result.some((entry) => entry.provider === "qianfan" && entry.id === "deepseek-v3.2"),
     ).toBe(false);
+  });
+
+  it("does not cache provider-filtered results as the full catalog", async () => {
+    const cfg = {} as OpenClawConfig;
+    mockPiDiscoveryModels([
+      { id: "gpt-4.1", provider: "openai", name: "GPT-4.1" },
+      { id: "kimi-k2.6", provider: "moonshot", name: "Kimi K2.6" },
+    ]);
+
+    const filtered = await loadModelCatalog({ config: cfg, providerFilter: "moonshot" });
+    const full = await loadModelCatalog({ config: cfg });
+
+    expect(filtered.map((entry) => `${entry.provider}/${entry.id}`)).toEqual([
+      "moonshot/kimi-k2.6",
+    ]);
+    expect(full.map((entry) => `${entry.provider}/${entry.id}`)).toEqual([
+      "moonshot/kimi-k2.6",
+      "openai/gpt-4.1",
+    ]);
   });
 
   it("does not duplicate provider-owned supplemental models already present in ModelRegistry", async () => {

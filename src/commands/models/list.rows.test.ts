@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../agents/model-suppression.js", () => ({
   shouldSuppressBuiltInModel: mocks.shouldSuppressBuiltInModel,
+  createBuiltInModelSuppressor: () => mocks.shouldSuppressBuiltInModel,
 }));
 
 vi.mock("./list.runtime.js", () => ({

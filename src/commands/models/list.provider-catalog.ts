@@ -11,8 +11,8 @@ import {
   runProviderStaticCatalog,
 } from "../../plugins/provider-discovery.js";
 import {
-  resolveBundledProviderCompatPluginIds,
-  resolveOwningPluginIdsForProvider,
+  resolveProviderStaticCatalogPluginIds,
+  resolveProviderStaticCatalogPluginIdsForProvider,
 } from "../../plugins/providers.js";
 
 const DISCOVERY_ORDERS = ["simple", "profile", "paired", "late"] as const;
@@ -28,19 +28,13 @@ export async function resolveProviderCatalogPluginIdsForFilter(params: {
   if (!providerFilter) {
     return undefined;
   }
-  const manifestPluginIds = resolveOwningPluginIdsForProvider({
+  const staticCatalogPluginIds = resolveProviderStaticCatalogPluginIdsForProvider({
     provider: providerFilter,
     config: params.cfg,
     env: params.env,
   });
-  if (manifestPluginIds) {
-    return manifestPluginIds;
-  }
-  const { resolveProviderContractPluginIdsForProviderAlias } =
-    await import("../../plugins/contracts/registry.js");
-  const bundledAliasPluginIds = resolveProviderContractPluginIdsForProviderAlias(providerFilter);
-  if (bundledAliasPluginIds) {
-    return bundledAliasPluginIds;
+  if (staticCatalogPluginIds) {
+    return staticCatalogPluginIds;
   }
   return undefined;
 }
@@ -85,15 +79,16 @@ export async function loadProviderCatalogModelsForList(params: {
   if (providerFilter && !onlyPluginIds) {
     return [];
   }
-
-  const bundledPluginIds = resolveBundledProviderCompatPluginIds({
-    config: params.cfg,
-    env,
-  });
-  const bundledPluginIdSet = new Set(bundledPluginIds);
+  const staticCatalogPluginIds =
+    onlyPluginIds ??
+    resolveProviderStaticCatalogPluginIds({
+      config: params.cfg,
+      env,
+    });
+  const staticCatalogPluginIdSet = new Set(staticCatalogPluginIds);
   const scopedPluginIds = onlyPluginIds
-    ? onlyPluginIds.filter((pluginId) => bundledPluginIdSet.has(pluginId))
-    : bundledPluginIds;
+    ? onlyPluginIds.filter((pluginId) => staticCatalogPluginIdSet.has(pluginId))
+    : staticCatalogPluginIds;
   if (scopedPluginIds.length === 0) {
     return [];
   }
@@ -108,7 +103,7 @@ export async function loadProviderCatalogModelsForList(params: {
     })
   ).filter(
     (provider) =>
-      typeof provider.pluginId === "string" && bundledPluginIdSet.has(provider.pluginId),
+      typeof provider.pluginId === "string" && staticCatalogPluginIdSet.has(provider.pluginId),
   );
   const byOrder = groupPluginDiscoveryProvidersByOrder(providers);
   const rows: Model<Api>[] = [];

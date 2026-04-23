@@ -9,7 +9,6 @@ import {
 } from "../shared/string-coerce.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import type { ModelCatalogEntry, ModelInputType } from "./model-catalog.types.js";
-import { ensureOpenClawModelsJson } from "./models-config.js";
 import { normalizeProviderId } from "./provider-id.js";
 
 const log = createSubsystemLogger("model-catalog");
@@ -80,16 +79,22 @@ function instantiatePiModelRegistry(
 
 export async function loadModelCatalog(params?: {
   config?: OpenClawConfig;
+  externalProfiles?: boolean;
+  includeProviderPlugins?: boolean;
   useCache?: boolean;
+  providerFilter?: string;
 }): Promise<ModelCatalogEntry[]> {
-  if (params?.useCache === false) {
+  const providerFilter = params?.providerFilter ? normalizeProviderId(params.providerFilter) : "";
+  const includeProviderPlugins = params?.includeProviderPlugins !== false;
+  const useGlobalCache = params?.useCache !== false && !providerFilter && includeProviderPlugins;
+  if (params?.useCache === false && !providerFilter) {
     modelCatalogPromise = null;
   }
-  if (modelCatalogPromise) {
+  if (useGlobalCache && modelCatalogPromise) {
     return modelCatalogPromise;
   }
 
-  modelCatalogPromise = (async () => {
+  const loadCatalog = (async () => {
     const models: ModelCatalogEntry[] = [];
     const timingEnabled = shouldLogModelCatalogTiming();
     const startMs = timingEnabled ? Date.now() : 0;
@@ -110,8 +115,7 @@ export async function loadModelCatalog(params?: {
       });
     try {
       const cfg = params?.config ?? loadConfig();
-      await ensureOpenClawModelsJson(cfg);
-      logStage("models-json-ready");
+      logStage("models-json-path-ready");
       // IMPORTANT: keep the dynamic import *inside* the try/catch.
       // If this fails once (e.g. during a pnpm install that temporarily swaps node_modules),
       // we must not poison the cache with a rejected promise (otherwise all channel handlers
@@ -121,7 +125,16 @@ export async function loadModelCatalog(params?: {
       const agentDir = resolveOpenClawAgentDir();
       const { shouldSuppressBuiltInModel } = await loadModelSuppression();
       logStage("catalog-deps-ready");
-      const authStorage = piSdk.discoverAuthStorage(agentDir);
+      const authStorage = piSdk.discoverAuthStorage(
+        agentDir,
+        providerFilter || params?.externalProfiles === false
+          ? {
+              externalProfiles: params?.externalProfiles ?? false,
+              ...(providerFilter ? { providerFilter } : {}),
+              readOnly: true,
+            }
+          : { readOnly: true },
+      );
       logStage("auth-storage-ready");
       const registry = instantiatePiModelRegistry(
         piSdk,
@@ -140,6 +153,9 @@ export async function loadModelCatalog(params?: {
         if (!provider) {
           continue;
         }
+        if (providerFilter && normalizeProviderId(provider) !== providerFilter) {
+          continue;
+        }
         if (shouldSuppressBuiltInModel({ provider, id, config: cfg })) {
           continue;
         }
@@ -152,37 +168,45 @@ export async function loadModelCatalog(params?: {
         const input = Array.isArray(entry?.input) ? entry.input : undefined;
         models.push({ id, name, provider, contextWindow, reasoning, input });
       }
-      const supplemental = await augmentModelCatalogWithProviderPlugins({
-        config: cfg,
-        env: process.env,
-        context: {
+      if (includeProviderPlugins) {
+        const supplemental = await augmentModelCatalogWithProviderPlugins({
           config: cfg,
-          agentDir,
           env: process.env,
-          entries: [...models],
-        },
-      });
-      if (supplemental.length > 0) {
-        const seen = new Set(
-          models.map(
-            (entry) =>
-              `${normalizeLowercaseStringOrEmpty(entry.provider)}::${normalizeLowercaseStringOrEmpty(entry.id)}`,
-          ),
-        );
-        for (const entry of supplemental) {
-          const key = `${normalizeLowercaseStringOrEmpty(entry.provider)}::${normalizeLowercaseStringOrEmpty(entry.id)}`;
-          if (seen.has(key)) {
-            continue;
+          providerFilter,
+          context: {
+            config: cfg,
+            agentDir,
+            env: process.env,
+            entries: [...models],
+          },
+        });
+        if (supplemental.length > 0) {
+          const seen = new Set(
+            models.map(
+              (entry) =>
+                `${normalizeLowercaseStringOrEmpty(entry.provider)}::${normalizeLowercaseStringOrEmpty(entry.id)}`,
+            ),
+          );
+          for (const entry of supplemental) {
+            const key = `${normalizeLowercaseStringOrEmpty(entry.provider)}::${normalizeLowercaseStringOrEmpty(entry.id)}`;
+            if (seen.has(key)) {
+              continue;
+            }
+            if (providerFilter && normalizeProviderId(entry.provider) !== providerFilter) {
+              continue;
+            }
+            models.push(entry);
+            seen.add(key);
           }
-          models.push(entry);
-          seen.add(key);
         }
       }
       logStage("plugin-models-merged", `entries=${models.length}`);
 
       if (models.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
-        modelCatalogPromise = null;
+        if (useGlobalCache) {
+          modelCatalogPromise = null;
+        }
       }
 
       const sorted = sortModels(models);
@@ -194,7 +218,9 @@ export async function loadModelCatalog(params?: {
         log.warn(`Failed to load model catalog: ${String(error)}`);
       }
       // Don't poison the cache on transient dependency/filesystem issues.
-      modelCatalogPromise = null;
+      if (useGlobalCache) {
+        modelCatalogPromise = null;
+      }
       if (models.length > 0) {
         return sortModels(models);
       }
@@ -202,7 +228,11 @@ export async function loadModelCatalog(params?: {
     }
   })();
 
-  return modelCatalogPromise;
+  if (useGlobalCache) {
+    modelCatalogPromise = loadCatalog;
+  }
+
+  return loadCatalog;
 }
 
 /**

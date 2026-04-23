@@ -10,7 +10,6 @@ const readConfigFileSnapshotForWrite = vi.fn().mockResolvedValue({
   writeOptions: {},
 });
 const setRuntimeConfigSnapshot = vi.fn();
-const ensureOpenClawModelsJson = vi.fn().mockResolvedValue(undefined);
 const resolveOpenClawAgentDir = vi.fn().mockReturnValue("/tmp/openclaw-agent");
 const ensureAuthProfileStore = vi.fn().mockReturnValue({ version: 1, profiles: {} });
 const listProfilesForProvider = vi.fn().mockReturnValue([]);
@@ -18,6 +17,7 @@ const resolveEnvApiKey = vi.fn().mockReturnValue(undefined);
 const resolveAwsSdkEnvVarName = vi.fn().mockReturnValue(undefined);
 const hasUsableCustomProviderApiKey = vi.fn().mockReturnValue(false);
 const loadModelCatalog = vi.fn(async () => []);
+const loadBuiltInCatalogModelsForList = vi.fn(async () => []);
 const loadProviderCatalogModelsForList = vi.fn<() => Promise<Array<Record<string, unknown>>>>(
   async () => [],
 );
@@ -69,12 +69,12 @@ vi.mock("./models/list.runtime.js", () => {
 
   return {
     ensureAuthProfileStore,
-    ensureOpenClawModelsJson,
     resolveOpenClawAgentDir,
     listProfilesForProvider,
     resolveEnvApiKey,
     resolveAwsSdkEnvVarName,
     hasUsableCustomProviderApiKey,
+    loadBuiltInCatalogModelsForList,
     loadModelCatalog,
     loadProviderCatalogModelsForList,
     discoverAuthStorage: () => ({}) as unknown,
@@ -95,6 +95,7 @@ vi.mock("./models/list.runtime.js", () => {
 
 vi.mock("../agents/model-suppression.js", () => ({
   shouldSuppressBuiltInModel,
+  createBuiltInModelSuppressor: () => shouldSuppressBuiltInModel,
 }));
 
 function makeRuntime() {
@@ -136,7 +137,8 @@ beforeEach(() => {
   getRuntimeConfig.mockReset();
   getRuntimeConfig.mockReturnValue({});
   listProfilesForProvider.mockReturnValue([]);
-  ensureOpenClawModelsJson.mockClear();
+  loadBuiltInCatalogModelsForList.mockReset();
+  loadBuiltInCatalogModelsForList.mockResolvedValue([]);
   loadModelCatalog.mockClear();
   loadModelCatalog.mockResolvedValue([]);
   loadProviderCatalogModelsForList.mockReset();
@@ -398,19 +400,19 @@ describe("models list/status", () => {
     expect(loadProviderCatalogModelsForList).not.toHaveBeenCalled();
   });
 
-  it("models list does not treat availability-unavailable code as discovery fallback", async () => {
+  it("models list --all does not treat availability-unavailable code as discovery fallback", async () => {
     configureGoogleAntigravityModel("claude-opus-4-6-thinking");
     modelRegistryState.getAllError = Object.assign(new Error("model discovery failed"), {
       code: "MODEL_AVAILABILITY_UNAVAILABLE",
     });
     const runtime = makeRuntime();
-    await modelsListCommand({ json: true }, runtime);
+    await modelsListCommand({ all: true, json: true }, runtime);
 
     expectModelRegistryUnavailable(runtime, "model discovery failed");
     expect(runtime.error.mock.calls[0]?.[0]).not.toContain("configured models may appear missing");
   });
 
-  it("models list fails fast when registry model discovery is unavailable", async () => {
+  it("models list --all fails fast when registry model discovery is unavailable", async () => {
     configureGoogleAntigravityModel("claude-opus-4-6-thinking");
     enableGoogleAntigravityAuthProfile();
     modelRegistryState.getAllError = Object.assign(new Error("model discovery unavailable"), {
@@ -420,7 +422,7 @@ describe("models list/status", () => {
 
     modelRegistryState.models = [];
     modelRegistryState.available = [];
-    await modelsListCommand({ json: true }, runtime);
+    await modelsListCommand({ all: true, json: true }, runtime);
 
     expectModelRegistryUnavailable(runtime, "model discovery unavailable");
   });
@@ -434,18 +436,6 @@ describe("models list/status", () => {
     ];
 
     await expect(loadModelRegistry({})).rejects.toThrow("model discovery unavailable");
-  });
-
-  it("loadModelRegistry does not persist models.json as a side effect", async () => {
-    modelRegistryState.models = [OPENAI_MODEL];
-    modelRegistryState.available = [OPENAI_MODEL];
-    const resolvedConfig = {
-      models: { providers: { openai: { apiKey: "sk-resolved-runtime-value" } } }, // pragma: allowlist secret
-    };
-
-    await loadModelRegistry(resolvedConfig as never);
-
-    expect(ensureOpenClawModelsJson).not.toHaveBeenCalled();
   });
 
   it("filters stale direct OpenAI spark rows from models list and registry views", async () => {
@@ -479,28 +469,6 @@ describe("models list/status", () => {
       "openai-codex/gpt-5.3-codex-spark",
     ]);
     expect(Array.from(loaded.availableKeys ?? [])).toEqual(["openai-codex/gpt-5.3-codex-spark"]);
-  });
-
-  it("modelsListCommand persists using the source snapshot config when provided", async () => {
-    modelRegistryState.models = [OPENAI_MODEL];
-    modelRegistryState.available = [OPENAI_MODEL];
-    const sourceConfig = {
-      models: { providers: { openai: { apiKey: "$OPENAI_API_KEY" } } }, // pragma: allowlist secret
-    };
-    const resolvedConfig = {
-      models: { providers: { openai: { apiKey: "sk-resolved-runtime-value" } } }, // pragma: allowlist secret
-    };
-    readConfigFileSnapshotForWrite.mockResolvedValue({
-      snapshot: { valid: true, resolved: resolvedConfig, sourceConfig },
-      writeOptions: {},
-    });
-    setDefaultModel("openai/gpt-4.1-mini");
-    const runtime = makeRuntime();
-
-    await modelsListCommand({ all: true, json: true }, runtime);
-
-    expect(ensureOpenClawModelsJson).toHaveBeenCalled();
-    expect(ensureOpenClawModelsJson.mock.calls[0]?.[0]).toEqual(sourceConfig);
   });
 
   it("toModelRow does not crash without cfg/authStore when availability is undefined", async () => {

@@ -15,7 +15,10 @@ import {
 } from "../plugins/provider-runtime.js";
 import { resolveRuntimeSyntheticAuthProviderRefs } from "../plugins/synthetic-auth.runtime.js";
 import { isRecord } from "../utils.js";
-import { ensureAuthProfileStore } from "./auth-profiles/store.js";
+import {
+  ensureAuthProfileStore,
+  ensureAuthProfileStoreWithoutExternalProfiles,
+} from "./auth-profiles/store.js";
 import { resolveProviderEnvApiKeyCandidates } from "./model-auth-env-vars.js";
 import { resolveEnvApiKey } from "./model-auth-env.js";
 import { resolvePiCredentialMapFromStore, type PiCredentialMap } from "./pi-auth-credentials.js";
@@ -36,6 +39,13 @@ type DiscoveredProviderRuntimeModelLike = Omit<ProviderRuntimeModelLike, "api"> 
 
 type DiscoverModelsOptions = {
   providerFilter?: string;
+  normalizeResolvedModels?: boolean;
+};
+
+type DiscoverAuthStorageOptions = {
+  externalProfiles?: boolean;
+  providerFilter?: string;
+  readOnly?: boolean;
 };
 
 type InMemoryAuthStorageBackendLike = {
@@ -67,7 +77,15 @@ function createInMemoryAuthStorageBackend(
   };
 }
 
-export function normalizeDiscoveredPiModel<T>(value: T, agentDir: string): T {
+type NormalizeDiscoveredPiModelOptions = {
+  candidateProviderRefs?: string[];
+};
+
+export function normalizeDiscoveredPiModel<T>(
+  value: T,
+  agentDir: string,
+  options?: NormalizeDiscoveredPiModelOptions,
+): T {
   if (!isRecord(value)) {
     return value;
   }
@@ -92,6 +110,7 @@ export function normalizeDiscoveredPiModel<T>(value: T, agentDir: string): T {
   const compatNormalized =
     applyProviderResolvedModelCompatWithPlugins({
       provider: model.provider,
+      candidateProviderRefs: options?.candidateProviderRefs,
       context: {
         provider: model.provider,
         modelId: model.id,
@@ -102,6 +121,7 @@ export function normalizeDiscoveredPiModel<T>(value: T, agentDir: string): T {
   const transportNormalized =
     applyProviderResolvedTransportWithPlugin({
       provider: model.provider,
+      candidateProviderRefs: options?.candidateProviderRefs,
       context: {
         provider: model.provider,
         modelId: model.id,
@@ -150,19 +170,46 @@ function createOpenClawModelRegistry(
   const providerFilter = options?.providerFilter ? normalizeProviderId(options.providerFilter) : "";
   const matchesProviderFilter = (entry: Model<Api>) =>
     !providerFilter || normalizeProviderId(entry.provider) === providerFilter;
+  const normalizeEntries = (entries: Model<Api>[]) => {
+    const filtered = entries.filter((entry: Model<Api>) => matchesProviderFilter(entry));
+    if (options?.normalizeResolvedModels === false) {
+      return filtered;
+    }
+    const candidateProviderRefs = resolveFilteredModelNormalizationProviderRefs(
+      providerFilter,
+      filtered,
+    );
+    return filtered.map((entry: Model<Api>) =>
+      normalizeDiscoveredPiModel(entry, agentDir, { candidateProviderRefs }),
+    );
+  };
 
-  registry.getAll = () =>
-    getAll()
-      .filter((entry: Model<Api>) => matchesProviderFilter(entry))
-      .map((entry: Model<Api>) => normalizeDiscoveredPiModel(entry, agentDir));
-  registry.getAvailable = () =>
-    getAvailable()
-      .filter((entry: Model<Api>) => matchesProviderFilter(entry))
-      .map((entry: Model<Api>) => normalizeDiscoveredPiModel(entry, agentDir));
+  registry.getAll = () => normalizeEntries(getAll());
+  registry.getAvailable = () => normalizeEntries(getAvailable());
   registry.find = (provider: string, modelId: string) =>
     normalizeDiscoveredPiModel(find(provider, modelId), agentDir);
 
   return registry;
+}
+
+function resolveFilteredModelNormalizationProviderRefs(
+  providerFilter: string,
+  entries: Model<Api>[],
+): string[] | undefined {
+  if (!providerFilter) {
+    return undefined;
+  }
+  const refs = new Set<string>([providerFilter]);
+  for (const entry of entries) {
+    const slash = entry.id.indexOf("/");
+    if (slash > 0) {
+      const provider = normalizeProviderId(entry.id.slice(0, slash));
+      if (provider) {
+        refs.add(provider);
+      }
+    }
+  }
+  return [...refs].toSorted((left, right) => left.localeCompare(right));
 }
 
 export function scrubLegacyStaticAuthJsonEntriesForDiscovery(pathname: string): void {
@@ -256,12 +303,17 @@ function createAuthStorage(AuthStorageLike: unknown, path: string, creds: PiCred
 export function addEnvBackedPiCredentials(
   credentials: PiCredentialMap,
   env: NodeJS.ProcessEnv = process.env,
+  options?: { providerFilter?: string },
 ): PiCredentialMap {
   const next = { ...credentials };
+  const providerFilter = options?.providerFilter ? normalizeProviderId(options.providerFilter) : "";
   // pi-coding-agent hides providers from its registry when auth storage lacks
   // a matching credential entry. Mirror env-backed provider auth here so
   // live/model discovery sees the same providers runtime auth can use.
   for (const provider of Object.keys(resolveProviderEnvApiKeyCandidates({ env }))) {
+    if (providerFilter && normalizeProviderId(provider) !== providerFilter) {
+      continue;
+    }
     if (next[provider]) {
       continue;
     }
@@ -277,10 +329,39 @@ export function addEnvBackedPiCredentials(
   return next;
 }
 
-export function resolvePiCredentialsForDiscovery(agentDir: string): PiCredentialMap {
-  const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-  const credentials = addEnvBackedPiCredentials(resolvePiCredentialMapFromStore(store));
-  for (const provider of resolveRuntimeSyntheticAuthProviderRefs()) {
+function filterPiCredentialsByProvider(
+  credentials: PiCredentialMap,
+  providerFilter: string,
+): PiCredentialMap {
+  if (!providerFilter) {
+    return credentials;
+  }
+  return Object.fromEntries(
+    Object.entries(credentials).filter(
+      ([provider]) => normalizeProviderId(provider) === providerFilter,
+    ),
+  );
+}
+
+export function resolvePiCredentialsForDiscovery(
+  agentDir: string,
+  options?: DiscoverAuthStorageOptions,
+): PiCredentialMap {
+  const providerFilter = options?.providerFilter ? normalizeProviderId(options.providerFilter) : "";
+  const store =
+    options?.externalProfiles === false
+      ? ensureAuthProfileStoreWithoutExternalProfiles(agentDir, { allowKeychainPrompt: false })
+      : ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+  const storeCredentials = filterPiCredentialsByProvider(
+    resolvePiCredentialMapFromStore(store),
+    providerFilter,
+  );
+  const credentials = addEnvBackedPiCredentials(storeCredentials, process.env, { providerFilter });
+  const syntheticRefs = resolveRuntimeSyntheticAuthProviderRefs();
+  for (const provider of syntheticRefs) {
+    if (providerFilter && normalizeProviderId(provider) !== providerFilter) {
+      continue;
+    }
     if (credentials[provider]) {
       continue;
     }
@@ -305,10 +386,15 @@ export function resolvePiCredentialsForDiscovery(agentDir: string): PiCredential
 }
 
 // Compatibility helpers for pi-coding-agent 0.50+ (discover* helpers removed).
-export function discoverAuthStorage(agentDir: string): PiAuthStorage {
-  const credentials = resolvePiCredentialsForDiscovery(agentDir);
+export function discoverAuthStorage(
+  agentDir: string,
+  options?: DiscoverAuthStorageOptions,
+): PiAuthStorage {
+  const credentials = resolvePiCredentialsForDiscovery(agentDir, options);
   const authPath = path.join(agentDir, "auth.json");
-  scrubLegacyStaticAuthJsonEntriesForDiscovery(authPath);
+  if (!options?.readOnly) {
+    scrubLegacyStaticAuthJsonEntriesForDiscovery(authPath);
+  }
   return createAuthStorage(PiAuthStorageClass, authPath, credentials);
 }
 

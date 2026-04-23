@@ -5,21 +5,16 @@ import {
 } from "./list.provider-catalog.js";
 
 const providerDiscoveryMocks = vi.hoisted(() => ({
-  resolveBundledProviderCompatPluginIds: vi.fn(),
-  resolveOwningPluginIdsForProvider: vi.fn(),
+  resolveProviderStaticCatalogPluginIds: vi.fn(),
+  resolveProviderStaticCatalogPluginIdsForProvider: vi.fn(),
   resolvePluginDiscoveryProviders: vi.fn(),
-  resolveProviderContractPluginIdsForProviderAlias: vi.fn(),
 }));
 
 vi.mock("../../plugins/providers.js", () => ({
-  resolveBundledProviderCompatPluginIds:
-    providerDiscoveryMocks.resolveBundledProviderCompatPluginIds,
-  resolveOwningPluginIdsForProvider: providerDiscoveryMocks.resolveOwningPluginIdsForProvider,
-}));
-
-vi.mock("../../plugins/contracts/registry.js", () => ({
-  resolveProviderContractPluginIdsForProviderAlias:
-    providerDiscoveryMocks.resolveProviderContractPluginIdsForProviderAlias,
+  resolveProviderStaticCatalogPluginIds:
+    providerDiscoveryMocks.resolveProviderStaticCatalogPluginIds,
+  resolveProviderStaticCatalogPluginIdsForProvider:
+    providerDiscoveryMocks.resolveProviderStaticCatalogPluginIdsForProvider,
 }));
 
 vi.mock("../../plugins/provider-discovery.js", async (importOriginal) => {
@@ -92,17 +87,17 @@ const defaultProviders = [chutesProvider, moonshotProvider, openaiProvider];
 describe("loadProviderCatalogModelsForList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    providerDiscoveryMocks.resolveBundledProviderCompatPluginIds.mockReturnValue([
-      "chutes",
+    providerDiscoveryMocks.resolveProviderStaticCatalogPluginIds.mockReturnValue([
       "moonshot",
       "openai",
     ]);
-    providerDiscoveryMocks.resolveOwningPluginIdsForProvider.mockImplementation(
+    providerDiscoveryMocks.resolveProviderStaticCatalogPluginIdsForProvider.mockImplementation(
       ({ provider }: { provider: string }) =>
-        defaultProviders.some((entry) => entry.id === provider) ? [provider] : undefined,
-    );
-    providerDiscoveryMocks.resolveProviderContractPluginIdsForProviderAlias.mockImplementation(
-      (provider: string) => (provider === "azure-openai-responses" ? ["openai"] : undefined),
+        provider === "azure-openai-responses"
+          ? ["openai"]
+          : defaultProviders.some((entry) => entry.id === provider)
+            ? [provider]
+            : undefined,
     );
     providerDiscoveryMocks.resolvePluginDiscoveryProviders.mockImplementation(
       async ({ onlyPluginIds }: { onlyPluginIds?: string[] }) =>
@@ -135,7 +130,7 @@ describe("loadProviderCatalogModelsForList", () => {
     );
   });
 
-  it("recognizes bundled provider hook aliases before the unknown-provider short-circuit", async () => {
+  it("recognizes static catalog aliases before the unknown-provider short-circuit", async () => {
     await expect(
       resolveProviderCatalogPluginIdsForFilter({
         cfg: baseParams.cfg,
@@ -145,44 +140,18 @@ describe("loadProviderCatalogModelsForList", () => {
     ).resolves.toEqual(["openai"]);
   });
 
-  it("does not execute workspace provider static catalogs", async () => {
-    const workspaceStaticCatalog = vi.fn(async () => ({
-      provider: { baseUrl: "https://workspace.example/v1", models: [] },
-    }));
-    providerDiscoveryMocks.resolveBundledProviderCompatPluginIds.mockReturnValue(["bundled-demo"]);
-    providerDiscoveryMocks.resolvePluginDiscoveryProviders.mockResolvedValue([
-      {
-        id: "bundled-demo",
-        pluginId: "bundled-demo",
-        label: "Bundled Demo",
-        auth: [],
-        staticCatalog: {
-          run: async () => null,
-        },
-      },
-      {
-        id: "workspace-demo",
-        pluginId: "workspace-demo",
-        label: "Workspace Demo",
-        auth: [],
-        staticCatalog: {
-          run: workspaceStaticCatalog,
-        },
-      },
-    ]);
-
+  it("scopes unfiltered static catalogs to declared static catalog providers", async () => {
     const rows = await loadProviderCatalogModelsForList({
       ...baseParams,
     });
 
     expect(providerDiscoveryMocks.resolvePluginDiscoveryProviders).toHaveBeenCalledWith(
       expect.objectContaining({
-        onlyPluginIds: ["bundled-demo"],
+        onlyPluginIds: ["moonshot", "openai"],
         includeUntrustedWorkspacePlugins: false,
       }),
     );
-    expect(workspaceStaticCatalog).not.toHaveBeenCalled();
-    expect(rows).toEqual([]);
+    expect(rows.map((row) => `${row.provider}/${row.id}`)).toEqual(["moonshot/kimi-k2.6"]);
   });
 
   it("keeps unknown provider filters eligible for early empty results", async () => {

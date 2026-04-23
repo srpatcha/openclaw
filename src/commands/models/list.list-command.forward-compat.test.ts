@@ -56,11 +56,11 @@ const mocks = vi.hoisted(() => {
     sourceConfig,
     resolvedConfig,
     loadModelsConfigWithSource: vi.fn(),
-    ensureOpenClawModelsJson: vi.fn(),
     ensureAuthProfileStore: vi.fn(),
     resolveOpenClawAgentDir: vi.fn(),
     loadModelRegistry: vi.fn(),
     loadModelCatalog: vi.fn(),
+    loadBuiltInCatalogModelsForList: vi.fn(),
     loadProviderCatalogModelsForList: vi.fn(),
     resolveConfiguredEntries: vi.fn(),
     printModelTable: vi.fn(),
@@ -76,7 +76,6 @@ function resetMocks() {
     resolvedConfig: mocks.resolvedConfig,
     diagnostics: [],
   });
-  mocks.ensureOpenClawModelsJson.mockResolvedValue({ wrote: false });
   mocks.ensureAuthProfileStore.mockReturnValue({ version: 1, profiles: {}, order: {} });
   mocks.resolveOpenClawAgentDir.mockReturnValue("/tmp/openclaw-agent");
   mocks.loadModelRegistry.mockResolvedValue({
@@ -87,6 +86,7 @@ function resetMocks() {
     },
   });
   mocks.loadModelCatalog.mockResolvedValue([]);
+  mocks.loadBuiltInCatalogModelsForList.mockResolvedValue([]);
   mocks.loadProviderCatalogModelsForList.mockResolvedValue([]);
   mocks.resolveConfiguredEntries.mockReturnValue({
     entries: [
@@ -127,6 +127,11 @@ function installModelsListCommandForwardCompatMocks() {
     }) =>
       (provider === "openai" || provider === "azure-openai-responses") &&
       id === "gpt-5.3-codex-spark",
+    createBuiltInModelSuppressor:
+      () =>
+      ({ provider, id }: { provider?: string | null; id?: string | null }) =>
+        (provider === "openai" || provider === "azure-openai-responses") &&
+        id === "gpt-5.3-codex-spark",
   }));
 
   vi.doMock("./load-config.js", () => ({
@@ -142,10 +147,10 @@ function installModelsListCommandForwardCompatMocks() {
   }));
 
   vi.doMock("./list.runtime.js", () => ({
-    ensureOpenClawModelsJson: mocks.ensureOpenClawModelsJson,
     ensureAuthProfileStore: mocks.ensureAuthProfileStore,
     resolveOpenClawAgentDir: mocks.resolveOpenClawAgentDir,
     listProfilesForProvider: mocks.listProfilesForProvider,
+    loadBuiltInCatalogModelsForList: mocks.loadBuiltInCatalogModelsForList,
     loadModelCatalog: mocks.loadModelCatalog,
     loadProviderCatalogModelsForList: mocks.loadProviderCatalogModelsForList,
     resolveModelWithRegistry: mocks.resolveModelWithRegistry,
@@ -217,6 +222,64 @@ describe("modelsListCommand forward-compat", () => {
           providerFilter: "moonshot",
         }),
       );
+    });
+
+    it("includes config-only provider models in --all output without registry persistence", async () => {
+      const resolvedConfig = {
+        ...mocks.resolvedConfig,
+        models: {
+          providers: {
+            "custom-proxy": {
+              baseUrl: "https://custom.example/v1",
+              models: [
+                {
+                  id: "custom-model",
+                  name: "Custom Model",
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                  contextWindow: 128_000,
+                  maxTokens: 4096,
+                  reasoning: false,
+                },
+              ],
+            },
+          },
+        },
+      };
+      mocks.loadModelsConfigWithSource.mockResolvedValueOnce({
+        sourceConfig: resolvedConfig,
+        resolvedConfig,
+        diagnostics: [],
+      });
+      mocks.resolveModelWithRegistry.mockReturnValueOnce({
+        provider: "custom-proxy",
+        id: "custom-model",
+        name: "Custom Model",
+        api: "openai-responses",
+        baseUrl: "https://custom.example/v1",
+        input: ["text"],
+        contextWindow: 128_000,
+        maxTokens: 4096,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      });
+      const runtime = createRuntime();
+
+      await modelsListCommand(
+        { all: true, provider: "custom-proxy", json: true },
+        runtime as never,
+      );
+
+      expect(mocks.loadModelRegistry).toHaveBeenCalledWith(
+        resolvedConfig,
+        expect.objectContaining({ providerFilter: "custom-proxy" }),
+      );
+      expect(lastPrintedRows<{ key: string; name: string; missing: boolean }>()).toEqual([
+        expect.objectContaining({
+          key: "custom-proxy/custom-model",
+          name: "Custom Model",
+          missing: false,
+          input: "text",
+        }),
+      ]);
     });
 
     it("does not mark configured codex model as missing when forward-compat can build a fallback", async () => {
@@ -293,16 +356,6 @@ describe("modelsListCommand forward-compat", () => {
       expect(codexPro).toBeTruthy();
       expect(codexPro?.missing).toBe(false);
       expect(codexPro?.tags).not.toContain("missing");
-    });
-
-    it("passes source config to model registry loading for persistence safety", async () => {
-      const runtime = createRuntime();
-
-      await modelsListCommand({ json: true }, runtime as never);
-
-      expect(mocks.loadModelRegistry).toHaveBeenCalledWith(mocks.resolvedConfig, {
-        sourceConfig: mocks.sourceConfig,
-      });
     });
 
     it("keeps configured local openai gpt-5.4 entries visible in --local output", async () => {
@@ -405,7 +458,6 @@ describe("modelsListCommand forward-compat", () => {
 
       await modelsListCommand({ all: true, provider: "codex", json: true }, runtime as never);
 
-      expect(mocks.ensureOpenClawModelsJson).not.toHaveBeenCalled();
       expect(mocks.loadModelRegistry).not.toHaveBeenCalled();
       expect(mocks.loadProviderCatalogModelsForList).toHaveBeenCalledWith({
         cfg: mocks.resolvedConfig,

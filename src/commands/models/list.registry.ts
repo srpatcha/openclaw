@@ -48,6 +48,36 @@ const hasAuthForProvider = (
   return false;
 };
 
+const authAvailabilityCache = new WeakMap<
+  AuthProfileStore,
+  WeakMap<OpenClawConfig, Map<string, boolean>>
+>();
+
+function hasCachedAuthForProvider(params: {
+  provider: string;
+  cfg: OpenClawConfig;
+  authStore: AuthProfileStore;
+}): boolean {
+  let byConfig = authAvailabilityCache.get(params.authStore);
+  if (!byConfig) {
+    byConfig = new WeakMap();
+    authAvailabilityCache.set(params.authStore, byConfig);
+  }
+  let byProvider = byConfig.get(params.cfg);
+  if (!byProvider) {
+    byProvider = new Map();
+    byConfig.set(params.cfg, byProvider);
+  }
+  const provider = params.provider;
+  const cached = byProvider.get(provider);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const resolved = hasAuthForProvider(provider, params.cfg, params.authStore);
+  byProvider.set(provider, resolved);
+  return resolved;
+}
+
 function createAvailabilityUnavailableError(message: string): Error {
   const err = new Error(message);
   (err as { code?: string }).code = MODEL_AVAILABILITY_UNAVAILABLE_CODE;
@@ -110,28 +140,45 @@ function loadAvailableModels(registry: ModelRegistry, cfg: OpenClawConfig): Mode
 
 export async function loadModelRegistry(
   cfg: OpenClawConfig,
-  opts?: { sourceConfig?: OpenClawConfig; providerFilter?: string },
+  opts?: {
+    loadAvailability?: boolean;
+    loadAllModels?: boolean;
+    providerFilter?: string;
+    normalizeResolvedModels?: boolean;
+  },
 ) {
   const agentDir = resolveOpenClawAgentDir();
-  const authStorage = discoverAuthStorage(agentDir);
+  const authStorage = discoverAuthStorage(agentDir, {
+    externalProfiles: false,
+    providerFilter: opts?.providerFilter,
+    readOnly: true,
+  });
   const registry = discoverModels(authStorage, agentDir, {
     providerFilter: opts?.providerFilter,
+    normalizeResolvedModels: opts?.normalizeResolvedModels,
   });
-  const models = registry.getAll().filter(
-    (model) =>
-      !shouldSuppressBuiltInModel({
-        provider: model.provider,
-        id: model.id,
-        baseUrl: model.baseUrl,
-        config: cfg,
-      }),
-  );
+  const models =
+    opts?.loadAllModels === false
+      ? []
+      : registry.getAll().filter(
+          (model) =>
+            !shouldSuppressBuiltInModel({
+              provider: model.provider,
+              id: model.id,
+              baseUrl: model.baseUrl,
+              config: cfg,
+            }),
+        );
   let availableKeys: Set<string> | undefined;
   let availabilityErrorMessage: string | undefined;
 
   try {
-    const availableModels = loadAvailableModels(registry, cfg);
-    availableKeys = new Set(availableModels.map((model) => modelKey(model.provider, model.id)));
+    if (opts?.loadAvailability === false) {
+      availableKeys = undefined;
+    } else {
+      const availableModels = loadAvailableModels(registry, cfg);
+      availableKeys = new Set(availableModels.map((model) => modelKey(model.provider, model.id)));
+    }
   } catch (err) {
     if (!shouldFallbackToAuthHeuristics(err)) {
       throw err;
@@ -151,6 +198,6 @@ export function toModelRow(params: Parameters<typeof toModelRowBase>[0]): ModelR
   return toModelRowBase({
     ...params,
     hasAuthForProvider: ({ provider, cfg, authStore }) =>
-      hasAuthForProvider(provider, cfg, authStore),
+      hasCachedAuthForProvider({ provider, cfg, authStore }),
   });
 }
