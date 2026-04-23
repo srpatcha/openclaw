@@ -218,6 +218,7 @@ explicitly promotes one as public.
     | `plugin-sdk/json-store` | Small JSON state read/write helpers |
     | `plugin-sdk/file-lock` | Re-entrant file-lock helpers |
     | `plugin-sdk/persistent-dedupe` | Disk-backed dedupe cache helpers |
+    | `plugin-sdk/persistent-keyed-store` | Persistent keyed registry helper with TTL, deterministic enumeration, and quarantine-on-corruption behavior for restart-safe lifecycle state |
     | `plugin-sdk/acp-runtime` | ACP runtime/session and reply-dispatch helpers |
     | `plugin-sdk/acp-binding-resolve-runtime` | Read-only ACP binding resolution without lifecycle startup imports |
     | `plugin-sdk/agent-config-primitives` | Narrow agent runtime config-schema primitives |
