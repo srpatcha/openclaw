@@ -4,6 +4,7 @@ import {
   applyPluginTextReplacements,
   mergePluginTextTransforms,
 } from "../agents/plugin-text-transforms.js";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import type { ProviderSystemPromptContribution } from "../agents/system-prompt-contribution.js";
 import type { ModelProviderConfig } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -26,8 +27,11 @@ import type { ProviderRuntimeModel } from "./provider-runtime-model.types.js";
 import type { ProviderThinkingProfile } from "./provider-thinking.types.js";
 import {
   resolveCatalogHookProviderPluginIds,
+  resolveDeclaredModelCatalogPluginIds,
+  resolveDeclaredModelCatalogPluginIdsForProvider,
   resolveExternalAuthProfileCompatFallbackPluginIds,
   resolveExternalAuthProfileProviderPluginIds,
+  resolveModelCatalogPluginIdsForProvider,
 } from "./providers.js";
 import { getActivePluginRegistryWorkspaceDirFromState } from "./runtime-state.js";
 import { resolveRuntimeTextTransforms } from "./text-transforms.runtime.js";
@@ -80,9 +84,11 @@ import type {
 
 const log = createSubsystemLogger("plugins/provider-runtime");
 const warnedExternalAuthFallbackPluginIds = new Set<string>();
+const warnedModelCatalogFallbackPluginIds = new Set<string>();
 
 function resetExternalAuthFallbackWarningCacheForTest(): void {
   warnedExternalAuthFallbackPluginIds.clear();
+  warnedModelCatalogFallbackPluginIds.clear();
 }
 
 export {
@@ -102,21 +108,63 @@ function resolveProviderPluginsForCatalogHooks(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  providerFilter?: string;
 }): ProviderPlugin[] {
   const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
-  const onlyPluginIds = resolveCatalogHookProviderPluginIds({
-    config: params.config,
-    workspaceDir,
-    env: params.env,
-  });
+  const env = params.env ?? process.env;
+  const declaredPluginIds = new Set(
+    params.providerFilter
+      ? resolveDeclaredModelCatalogPluginIdsForProvider({
+          provider: params.providerFilter,
+          config: params.config,
+          workspaceDir,
+          env,
+        })
+      : resolveDeclaredModelCatalogPluginIds({
+          config: params.config,
+          workspaceDir,
+          env,
+        }),
+  );
+  const onlyPluginIds = params.providerFilter
+    ? (resolveModelCatalogPluginIdsForProvider({
+        provider: params.providerFilter,
+        config: params.config,
+        workspaceDir,
+        env,
+      }) ?? [])
+    : resolveCatalogHookProviderPluginIds({
+        config: params.config,
+        workspaceDir,
+        env,
+      });
   if (onlyPluginIds.length === 0) {
     return [];
   }
-  return resolveProviderPluginsForHooks({
+  const plugins = resolveProviderPluginsForHooks({
     ...params,
     workspaceDir,
+    env,
     onlyPluginIds,
   });
+  for (const plugin of plugins) {
+    const pluginId = plugin.pluginId ?? plugin.id;
+    if (
+      declaredPluginIds.has(pluginId) ||
+      warnedModelCatalogFallbackPluginIds.has(pluginId) ||
+      (!plugin.suppressBuiltInModel && !plugin.augmentModelCatalog)
+    ) {
+      continue;
+    }
+    warnedModelCatalogFallbackPluginIds.add(pluginId);
+    // Deprecated compatibility path for third-party provider plugins that still
+    // rely on provider ownership alone for catalog hooks. Remove this warning
+    // with resolveModelCatalogCompatFallbackPluginIds after the migration window.
+    log.warn(
+      `Provider plugin "${sanitizeForLog(pluginId)}" uses model catalog hooks without declaring modelCatalog.providers. This compatibility fallback is deprecated and will be removed in a future release.`,
+    );
+  }
+  return plugins;
 }
 
 export function runProviderDynamicModel(params: {
@@ -248,8 +296,19 @@ function resolveProviderCompatHookPlugins(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  candidateProviderRefs?: string[];
+  context: ProviderNormalizeResolvedModelContext;
 }): ProviderPlugin[] {
-  const candidates = resolveProviderPluginsForHooks(params);
+  const activeProviderRefs = resolveModelNormalizationProviderRefs(
+    params.provider,
+    params.context.modelId,
+  );
+  const candidates = resolveProviderPluginsForHooks({
+    ...params,
+    providerRefs: params.candidateProviderRefs,
+  }).filter((plugin) =>
+    params.candidateProviderRefs ? matchesProviderRefs(plugin, activeProviderRefs) : true,
+  );
   const owner = resolveProviderRuntimePlugin(params);
   if (!owner) {
     return candidates;
@@ -292,6 +351,7 @@ export function applyProviderResolvedModelCompatWithPlugins(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  candidateProviderRefs?: string[];
   context: ProviderNormalizeResolvedModelContext;
 }): ProviderRuntimeModel | undefined {
   let nextModel = params.context.model;
@@ -321,6 +381,7 @@ export function applyProviderResolvedTransportWithPlugin(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  candidateProviderRefs?: string[];
   context: ProviderNormalizeResolvedModelContext;
 }): ProviderRuntimeModel | undefined {
   const normalized = normalizeProviderTransportWithPlugin({
@@ -328,6 +389,10 @@ export function applyProviderResolvedTransportWithPlugin(params: {
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
+    candidateProviderRefs: params.candidateProviderRefs,
+    activeProviderRefs: params.candidateProviderRefs
+      ? resolveModelNormalizationProviderRefs(params.provider, params.context.modelId)
+      : undefined,
     context: {
       provider: params.context.provider,
       api: params.context.model.api,
@@ -351,6 +416,26 @@ export function applyProviderResolvedTransportWithPlugin(params: {
   };
 }
 
+function resolveModelNormalizationProviderRefs(provider: string, modelId: string): string[] {
+  const slash = modelId.indexOf("/");
+  if (slash <= 0) {
+    return [provider];
+  }
+  return [...new Set([provider, modelId.slice(0, slash)])];
+}
+
+function matchesProviderRefs(plugin: ProviderPlugin, refs: readonly string[]): boolean {
+  const normalizedRefs = refs.map((ref) => normalizeProviderId(ref)).filter(Boolean);
+  return normalizedRefs.some((ref) => {
+    if (normalizeProviderId(plugin.id) === ref) {
+      return true;
+    }
+    return [...(plugin.aliases ?? []), ...(plugin.hookAliases ?? [])].some(
+      (alias) => normalizeProviderId(alias) === ref,
+    );
+  });
+}
+
 export function normalizeProviderModelIdWithPlugin(params: {
   provider: string;
   config?: OpenClawConfig;
@@ -367,6 +452,9 @@ export function normalizeProviderTransportWithPlugin(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  candidateProviderRefs?: string[];
+  candidateModelRefs?: string[];
+  activeProviderRefs?: string[];
   context: ProviderNormalizeTransportContext;
 }): { api?: string | null; baseUrl?: string } | undefined {
   const hasTransportChange = (normalized: { api?: string | null; baseUrl?: string }) =>
@@ -378,7 +466,14 @@ export function normalizeProviderTransportWithPlugin(params: {
     return normalizedMatched;
   }
 
-  for (const candidate of resolveProviderPluginsForHooks(params)) {
+  for (const candidate of resolveProviderPluginsForHooks({
+    ...params,
+    providerRefs: params.candidateProviderRefs,
+    modelRefs: params.candidateModelRefs,
+  })) {
+    if (params.activeProviderRefs && !matchesProviderRefs(candidate, params.activeProviderRefs)) {
+      continue;
+    }
     if (!candidate.normalizeTransport || candidate === matchedPlugin) {
       continue;
     }
@@ -855,7 +950,10 @@ export function resolveProviderBuiltInModelSuppression(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderBuiltInModelSuppressionContext;
 }) {
-  for (const plugin of resolveProviderPluginsForCatalogHooks(params)) {
+  for (const plugin of resolveProviderPluginsForCatalogHooks({
+    ...params,
+    providerFilter: params.context.provider,
+  })) {
     const result = plugin.suppressBuiltInModel?.(params.context);
     if (result?.suppress) {
       return result;
@@ -864,10 +962,22 @@ export function resolveProviderBuiltInModelSuppression(params: {
   return undefined;
 }
 
+export function resolveProviderBuiltInModelSuppressionPlugins(params: {
+  config?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  providerFilter?: string;
+}): ProviderPlugin[] {
+  return resolveProviderPluginsForCatalogHooks(params).filter(
+    (plugin) => plugin.suppressBuiltInModel,
+  );
+}
+
 export async function augmentModelCatalogWithProviderPlugins(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  providerFilter?: string;
   context: ProviderAugmentModelCatalogContext;
 }) {
   const supplemental = [] as ProviderAugmentModelCatalogContext["entries"];

@@ -17,6 +17,11 @@ const PROVIDER_CATALOG_CONTRACT_TIMEOUT_MS = 300_000;
 type ResolvePluginProviders = (params?: { onlyPluginIds?: string[] }) => ProviderPlugin[];
 type ResolveOwningPluginIdsForProvider = (params: { provider: string }) => string[] | undefined;
 type ResolveCatalogHookProviderPluginIds = (params: unknown) => string[];
+type ResolveDeclaredModelCatalogPluginIds = (params: unknown) => string[];
+type ResolveDeclaredModelCatalogPluginIdsForProvider = (params: { provider: string }) => string[];
+type ResolveModelCatalogPluginIdsForProvider = (params: {
+  provider: string;
+}) => string[] | undefined;
 
 const resolvePluginProvidersMock = vi.hoisted(() => vi.fn<ResolvePluginProviders>(() => []));
 const resolveOwningPluginIdsForProviderMock = vi.hoisted(() =>
@@ -25,12 +30,27 @@ const resolveOwningPluginIdsForProviderMock = vi.hoisted(() =>
 const resolveCatalogHookProviderPluginIdsMock = vi.hoisted(() =>
   vi.fn<ResolveCatalogHookProviderPluginIds>((_) => [] as string[]),
 );
+const resolveDeclaredModelCatalogPluginIdsMock = vi.hoisted(() =>
+  vi.fn<ResolveDeclaredModelCatalogPluginIds>((_) => [] as string[]),
+);
+const resolveDeclaredModelCatalogPluginIdsForProviderMock = vi.hoisted(() =>
+  vi.fn<ResolveDeclaredModelCatalogPluginIdsForProvider>(() => [] as string[]),
+);
+const resolveModelCatalogPluginIdsForProviderMock = vi.hoisted(() =>
+  vi.fn<ResolveModelCatalogPluginIdsForProvider>(() => undefined),
+);
 
 vi.mock("../../../src/plugins/providers.js", () => ({
   resolveOwningPluginIdsForProvider: (params: unknown) =>
     resolveOwningPluginIdsForProviderMock(params as never),
   resolveCatalogHookProviderPluginIds: (params: unknown) =>
     resolveCatalogHookProviderPluginIdsMock(params as never),
+  resolveDeclaredModelCatalogPluginIds: (params: unknown) =>
+    resolveDeclaredModelCatalogPluginIdsMock(params),
+  resolveDeclaredModelCatalogPluginIdsForProvider: (params: unknown) =>
+    resolveDeclaredModelCatalogPluginIdsForProviderMock(params as never),
+  resolveModelCatalogPluginIdsForProvider: (params: unknown) =>
+    resolveModelCatalogPluginIdsForProviderMock(params as never),
 }));
 
 vi.mock("../../../src/plugins/providers.runtime.js", () => ({
@@ -100,6 +120,31 @@ export function describeOpenAIProviderCatalogContract() {
 
         resolveCatalogHookProviderPluginIdsMock.mockReset();
         resolveCatalogHookProviderPluginIdsMock.mockReturnValue(["openai"]);
+
+        resolveDeclaredModelCatalogPluginIdsMock.mockReset();
+        resolveDeclaredModelCatalogPluginIdsMock.mockReturnValue(["openai"]);
+        resolveDeclaredModelCatalogPluginIdsForProviderMock.mockReset();
+        resolveDeclaredModelCatalogPluginIdsForProviderMock.mockImplementation((params) => {
+          switch (params.provider) {
+            case "azure-openai-responses":
+            case "openai":
+            case "openai-codex":
+              return ["openai"];
+            default:
+              return [];
+          }
+        });
+        resolveModelCatalogPluginIdsForProviderMock.mockReset();
+        resolveModelCatalogPluginIdsForProviderMock.mockImplementation((params) => {
+          switch (params.provider) {
+            case "azure-openai-responses":
+            case "openai":
+            case "openai-codex":
+              return ["openai"];
+            default:
+              return undefined;
+          }
+        });
       });
 
       it("keeps codex-only missing-auth hints wired through the provider runtime", async () => {

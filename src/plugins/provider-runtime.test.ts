@@ -22,20 +22,34 @@ type IsPluginProvidersLoadInFlight =
   typeof import("./providers.runtime.js").isPluginProvidersLoadInFlight;
 type ResolveCatalogHookProviderPluginIds =
   typeof import("./providers.js").resolveCatalogHookProviderPluginIds;
+type ResolveDeclaredModelCatalogPluginIds =
+  typeof import("./providers.js").resolveDeclaredModelCatalogPluginIds;
+type ResolveDeclaredModelCatalogPluginIdsForProvider =
+  typeof import("./providers.js").resolveDeclaredModelCatalogPluginIdsForProvider;
 type ResolveExternalAuthProfileCompatFallbackPluginIds =
   typeof import("./providers.js").resolveExternalAuthProfileCompatFallbackPluginIds;
 type ResolveExternalAuthProfileProviderPluginIds =
   typeof import("./providers.js").resolveExternalAuthProfileProviderPluginIds;
+type ResolveModelCatalogPluginIdsForProvider =
+  typeof import("./providers.js").resolveModelCatalogPluginIdsForProvider;
 
 const resolvePluginProvidersMock = vi.fn<ResolvePluginProviders>((_) => [] as ProviderPlugin[]);
 const isPluginProvidersLoadInFlightMock = vi.fn<IsPluginProvidersLoadInFlight>((_) => false);
 const resolveCatalogHookProviderPluginIdsMock = vi.fn<ResolveCatalogHookProviderPluginIds>(
   (_) => [] as string[],
 );
+const resolveDeclaredModelCatalogPluginIdsMock = vi.fn<ResolveDeclaredModelCatalogPluginIds>(
+  (_) => [] as string[],
+);
+const resolveDeclaredModelCatalogPluginIdsForProviderMock =
+  vi.fn<ResolveDeclaredModelCatalogPluginIdsForProvider>((_) => [] as string[]);
 const resolveExternalAuthProfileCompatFallbackPluginIdsMock =
   vi.fn<ResolveExternalAuthProfileCompatFallbackPluginIds>((_) => [] as string[]);
 const resolveExternalAuthProfileProviderPluginIdsMock =
   vi.fn<ResolveExternalAuthProfileProviderPluginIds>((_) => [] as string[]);
+const resolveModelCatalogPluginIdsForProviderMock = vi.fn<ResolveModelCatalogPluginIdsForProvider>(
+  (_) => [] as string[] | undefined,
+);
 const providerRuntimeWarnMock = vi.fn();
 
 let augmentModelCatalogWithProviderPlugins: typeof import("./provider-runtime.js").augmentModelCatalogWithProviderPlugins;
@@ -247,10 +261,16 @@ describe("provider-runtime", () => {
     vi.doMock("./providers.js", () => ({
       resolveCatalogHookProviderPluginIds: (params: unknown) =>
         resolveCatalogHookProviderPluginIdsMock(params as never),
+      resolveDeclaredModelCatalogPluginIds: (params: unknown) =>
+        resolveDeclaredModelCatalogPluginIdsMock(params as never),
+      resolveDeclaredModelCatalogPluginIdsForProvider: (params: unknown) =>
+        resolveDeclaredModelCatalogPluginIdsForProviderMock(params as never),
       resolveExternalAuthProfileCompatFallbackPluginIds: (params: unknown) =>
         resolveExternalAuthProfileCompatFallbackPluginIdsMock(params as never),
       resolveExternalAuthProfileProviderPluginIds: (params: unknown) =>
         resolveExternalAuthProfileProviderPluginIdsMock(params as never),
+      resolveModelCatalogPluginIdsForProvider: (params: unknown) =>
+        resolveModelCatalogPluginIdsForProviderMock(params as never),
     }));
     vi.doMock("./providers.runtime.js", () => ({
       resolvePluginProviders: (params: unknown) => resolvePluginProvidersMock(params as never),
@@ -323,10 +343,16 @@ describe("provider-runtime", () => {
     isPluginProvidersLoadInFlightMock.mockReturnValue(false);
     resolveCatalogHookProviderPluginIdsMock.mockReset();
     resolveCatalogHookProviderPluginIdsMock.mockReturnValue([]);
+    resolveDeclaredModelCatalogPluginIdsMock.mockReset();
+    resolveDeclaredModelCatalogPluginIdsMock.mockReturnValue([]);
+    resolveDeclaredModelCatalogPluginIdsForProviderMock.mockReset();
+    resolveDeclaredModelCatalogPluginIdsForProviderMock.mockReturnValue([]);
     resolveExternalAuthProfileCompatFallbackPluginIdsMock.mockReset();
     resolveExternalAuthProfileCompatFallbackPluginIdsMock.mockReturnValue([]);
     resolveExternalAuthProfileProviderPluginIdsMock.mockReset();
     resolveExternalAuthProfileProviderPluginIdsMock.mockReturnValue([]);
+    resolveModelCatalogPluginIdsForProviderMock.mockReset();
+    resolveModelCatalogPluginIdsForProviderMock.mockReturnValue([]);
     providerRuntimeWarnMock.mockReset();
   });
 
@@ -804,6 +830,8 @@ describe("provider-runtime", () => {
 
   it("dispatches runtime hooks for the matched provider", async () => {
     resolveCatalogHookProviderPluginIdsMock.mockReturnValue(["openai"]);
+    resolveDeclaredModelCatalogPluginIdsForProviderMock.mockReturnValue(["openai"]);
+    resolveModelCatalogPluginIdsForProviderMock.mockReturnValue(["openai"]);
     resolveExternalAuthProfileProviderPluginIdsMock.mockReturnValue(["demo"]);
     const prepareDynamicModel = vi.fn(async () => undefined);
     const createStreamFn = vi.fn(() => vi.fn());
@@ -1492,6 +1520,8 @@ describe("provider-runtime", () => {
 
   it("resolves bundled catalog hooks through provider plugins", async () => {
     resolveCatalogHookProviderPluginIdsMock.mockReturnValue(["openai"]);
+    resolveDeclaredModelCatalogPluginIdsForProviderMock.mockReturnValue(["openai"]);
+    resolveModelCatalogPluginIdsForProviderMock.mockReturnValue(["openai"]);
     resolvePluginProvidersMock.mockImplementation((params?: { onlyPluginIds?: string[] }) => {
       const onlyPluginIds = params?.onlyPluginIds;
       if (!onlyPluginIds || !onlyPluginIds.includes("openai")) {

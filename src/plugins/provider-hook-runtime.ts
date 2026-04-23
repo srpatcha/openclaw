@@ -63,6 +63,7 @@ function buildHookProviderCacheKey(params: {
   workspaceDir?: string;
   onlyPluginIds?: string[];
   providerRefs?: string[];
+  modelRefs?: string[];
   env?: NodeJS.ProcessEnv;
 }) {
   const { roots } = resolvePluginCacheInputs({
@@ -70,7 +71,7 @@ function buildHookProviderCacheKey(params: {
     env: params.env,
   });
   const onlyPluginIds = normalizePluginIdScope(params.onlyPluginIds);
-  return `${roots.workspace ?? ""}::${roots.global}::${roots.stock ?? ""}::${JSON.stringify(params.config ?? null)}::${serializePluginIdScope(onlyPluginIds)}::${JSON.stringify(params.providerRefs ?? [])}`;
+  return `${roots.workspace ?? ""}::${roots.global}::${roots.stock ?? ""}::${JSON.stringify(params.config ?? null)}::${serializePluginIdScope(onlyPluginIds)}::${JSON.stringify(params.providerRefs ?? [])}::${JSON.stringify(params.modelRefs ?? [])}`;
 }
 
 export function clearProviderRuntimeHookCache(): void {
@@ -98,6 +99,7 @@ export function resolveProviderPluginsForHooks(params: {
   env?: NodeJS.ProcessEnv;
   onlyPluginIds?: string[];
   providerRefs?: string[];
+  modelRefs?: string[];
 }): ProviderPlugin[] {
   const env = params.env ?? process.env;
   const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
@@ -110,6 +112,7 @@ export function resolveProviderPluginsForHooks(params: {
     workspaceDir,
     onlyPluginIds: params.onlyPluginIds,
     providerRefs: params.providerRefs,
+    modelRefs: params.modelRefs,
     env,
   });
   const cached = cacheBucket.get(cacheKey);
